@@ -7,7 +7,7 @@ A production-ready SaaS application featuring AI-powered image generation and in
 ![MongoDB](https://img.shields.io/badge/MongoDB-8.0-green?logo=mongodb)
 ![React](https://img.shields.io/badge/React-19-61DAFB?logo=react)
 
-**Live Demo**: [https://ai-image-chat-saas.vercel.app/](https://ai-image-chat-saas.vercel.app/)
+**Live Demo**: https://ai-image-generator-chatbot.vercel.app/
 
 ## Technical Highlights
 
