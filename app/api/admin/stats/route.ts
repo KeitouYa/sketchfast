@@ -38,8 +38,7 @@ export async function GET(req: Request) {
         total: totalUsers,
       },
       credits: {
-        totalInCirculation:
-          totalCredits[0]?.total || 0,
+        totalInCirculation: totalCredits[0]?.total || 0,
         totalPurchased: totalCreditsPurchased[0]?.total || 0,
       },
       images: {
@@ -47,7 +46,7 @@ export async function GET(req: Request) {
       },
       costs: {
         totalPlatformCost: totalCost,
-      }
+      },
     };
 
     logger.info("Admin stats accessed", { requestId, stats });
@@ -65,5 +64,3 @@ export async function GET(req: Request) {
     return Response.json(fail("Internal server error", 500), { status: 500 });
   }
 }
-
-

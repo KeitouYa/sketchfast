@@ -40,12 +40,19 @@ export const ImageGenerationProvider = ({
     setLoading(true);
 
     try {
-      const { success, _id } = await generateImageAi(imagePrompt);
+      const result = await generateImageAi(imagePrompt);
+      const { success, _id, rateLimited } = result as {
+        success: boolean;
+        _id: string | null;
+        rateLimited?: boolean;
+      };
 
       if (success) {
         await getUserCredits();
         toast.success("🎉 Image generated!");
         router.push(`/dashboard/image/${_id}`);
+      } else if (rateLimited) {
+        toast.error("Daily limit reached (20 images/day). Try again tomorrow.");
       } else {
         await getUserCredits();
         toast.error("Insufficient credits. Please buy more credits.");

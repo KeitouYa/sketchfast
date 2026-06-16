@@ -1,6 +1,5 @@
 import { auth } from "@clerk/nextjs/server";
 import { handleChatController } from "@/src/controllers/chat/chat.controller";
-import { checkRateLimit } from "@/src/middlewares/rate-limit";
 import { logger } from "@/src/lib/logger";
 import { nanoid } from "nanoid";
 
@@ -26,10 +25,7 @@ export async function POST(req: Request) {
       );
     }
 
-    // 2️⃣ Rate limit (keep if you already use it)
-    await checkRateLimit(userId);
-
-    // 3️⃣ Parse client payload ONLY
+    // 2️⃣ Parse client payload ONLY
     const body = await req.json();
 
     // ✅ Pass context separately

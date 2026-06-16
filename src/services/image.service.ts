@@ -12,6 +12,7 @@ import { nanoid } from "nanoid";
 import db from "@/src/providers/db.provider";
 import { imageRepository } from "@/src/repositories/image.repository";
 import { creditRepository } from "@/src/repositories/credits.repository";
+import { checkImageRateLimit } from "@/src/middlewares/rate-limit";
 import { logger } from "@/src/lib/logger";
 import { trackCost } from "@/src/services/cost-tracking.service";
 
@@ -73,6 +74,24 @@ export async function generateImageAi(imagePrompt: string, requestId?: string) {
 
   if (!userEmail) {
     return { success: false, _id: null, credits: null };
+  }
+
+  // ⭐ Rate limit BEFORE touching DB / credits: 20 image generations per day per user
+  const rateLimit = await checkImageRateLimit(userEmail);
+  if (!rateLimit.success) {
+    logger.warn("Image generation rate limit exceeded", {
+      userEmail,
+      limit: rateLimit.limit,
+      reset: rateLimit.reset,
+      requestId,
+    });
+    return {
+      success: false,
+      _id: null,
+      credits: null,
+      rateLimited: true,
+      retryAfter: rateLimit.reset,
+    };
   }
 
   try {
