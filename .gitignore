@@ -67,3 +67,7 @@ metrics-report.json
 /test-demo
 # Resume files
 .github/Resume*
+
+# Private planning docs (not for public repo)
+/document
+/docs/开发文档框架.md
