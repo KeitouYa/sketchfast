@@ -234,6 +234,7 @@ export async function sendChatMessage(
     }
 
     /* ---------- Credits ---------- */
+    let charged = false;
     const tCredit = nowMs();
     if (!DISABLE_CHAT_CREDITS) {
       const result = await creditRepository.deductCreditsAtomic(
@@ -250,13 +251,31 @@ export async function sendChatMessage(
       }
 
       remainingCredits = result.remainingCredits;
+      charged = true;
     }
     
     creditMs = nowMs() - tCredit;
 
     /* ---------- AI call ---------- */
     const tAi = nowMs();
-    const aiResult = await chatWithFallback(message, provider, requestId);
+    let aiResult: ChatFallbackResult;
+    try {
+      aiResult = await chatWithFallback(message, provider, requestId);
+    } catch (err) {
+      // Every provider failed after the credit was taken: give it back
+      if (charged) {
+        try {
+          remainingCredits = await creditRepository.refundCredits(
+            userEmail,
+            CHAT_CREDIT_COST,
+            requestId
+          );
+        } catch (refundErr) {
+          logger.error("Failed to refund chat credit", { err: refundErr, requestId });
+        }
+      }
+      throw err;
+    }
     aiMs = nowMs() - tAi;
 
     providerUsed = aiResult.providerUsed;

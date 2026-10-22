@@ -28,14 +28,20 @@ import { sendChatMessage } from "@/src/services/chat.service";
 import { creditRepository } from "@/src/repositories/credits.repository";
 import { getAIProvider } from "@/src/providers/ai/ai.factory";
 import { cache } from "@/src/lib/cache";
+import { InsufficientCreditsError, ProviderError } from "@/src/lib/errors";
 
+// The DISABLE_CHAT_* flags are read at module load; jest.setup.js sets them
+// to "false", so cache and credits are both on in these tests.
 describe("Chat Service", () => {
   beforeEach(() => {
     jest.clearAllMocks();
-    // Reset environment variables for each test
-    delete process.env.DISABLE_CHAT_CREDITS;
-    delete process.env.DISABLE_CHAT_CACHE;
-    delete process.env.SIMULATE_GEMINI_FAILURE;
+    (cache.get as jest.Mock).mockResolvedValue(null);
+    (cache.set as jest.Mock).mockResolvedValue(true);
+    (creditRepository.deductCreditsAtomic as jest.Mock).mockResolvedValue({
+      success: true,
+      remainingCredits: 9,
+    });
+    (creditRepository.refundCredits as jest.Mock).mockResolvedValue(10);
   });
 
   it("should return cached reply if available", async () => {
@@ -54,14 +60,11 @@ describe("Chat Service", () => {
     expect(creditRepository.deductCreditsAtomic).not.toHaveBeenCalled();
   });
 
-  it("should call AI without deducting credits if not cached (credits disabled)", async () => {
-    (cache.get as jest.Mock).mockResolvedValue(null);
-
+  it("should deduct one credit and return the AI reply when not cached", async () => {
     const mockAI = {
       chat: jest.fn().mockResolvedValue("AI response"),
     };
     (getAIProvider as jest.Mock).mockResolvedValue(mockAI);
-    (cache.set as jest.Mock).mockResolvedValue(true);
 
     const result = await sendChatMessage(
       "test message",
@@ -70,17 +73,19 @@ describe("Chat Service", () => {
       "req123"
     );
 
-    // Credits are disabled, so no deduction should happen
-    expect(creditRepository.deductCreditsAtomic).not.toHaveBeenCalled();
+    expect(creditRepository.deductCreditsAtomic).toHaveBeenCalledWith(
+      "test@example.com",
+      1,
+      "req123"
+    );
     expect(mockAI.chat).toHaveBeenCalledWith("test message");
     expect(result.reply).toBe("AI response");
     expect(result.cached).toBe(false);
-    expect(result.remainingCredits).toBe(null); // No credits deducted
+    expect(result.remainingCredits).toBe(9);
+    expect(creditRepository.refundCredits).not.toHaveBeenCalled();
   });
 
   it("should handle provider fallback correctly", async () => {
-    (cache.get as jest.Mock).mockResolvedValue(null);
-
     // Mock Gemini to fail, OpenAI to succeed
     const mockGemini = {
       chat: jest.fn().mockRejectedValue(new Error("Gemini failed")),
@@ -93,8 +98,6 @@ describe("Chat Service", () => {
       .mockResolvedValueOnce(mockGemini)
       .mockResolvedValueOnce(mockOpenAI);
 
-    (cache.set as jest.Mock).mockResolvedValue(true);
-
     const result = await sendChatMessage(
       "test message",
       "gemini", // Request Gemini first
@@ -104,7 +107,40 @@ describe("Chat Service", () => {
 
     expect(result.reply).toBe("Fallback response");
     expect(result.cached).toBe(false);
+    expect(creditRepository.refundCredits).not.toHaveBeenCalled();
+  });
+
+  it("should refund the credit when every provider fails", async () => {
+    const failing = () => ({
+      chat: jest.fn().mockRejectedValue(new Error("provider down")),
+    });
+    (getAIProvider as jest.Mock)
+      .mockResolvedValueOnce(failing())
+      .mockResolvedValueOnce(failing());
+
+    await expect(
+      sendChatMessage("test message", "gemini", "user123", "req123")
+    ).rejects.toBeInstanceOf(ProviderError);
+
+    expect(creditRepository.refundCredits).toHaveBeenCalledWith(
+      "test@example.com",
+      1,
+      "req123"
+    );
+    expect(cache.set).not.toHaveBeenCalled();
+  });
+
+  it("should not call the AI when credits are insufficient", async () => {
+    (creditRepository.deductCreditsAtomic as jest.Mock).mockResolvedValue({
+      success: false,
+      remainingCredits: 0,
+    });
+
+    await expect(
+      sendChatMessage("test message", "gemini", "user123", "req123")
+    ).rejects.toBeInstanceOf(InsufficientCreditsError);
+
+    expect(getAIProvider).not.toHaveBeenCalled();
+    expect(creditRepository.refundCredits).not.toHaveBeenCalled();
   });
 });
-
-

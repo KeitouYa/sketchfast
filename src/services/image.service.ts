@@ -13,6 +13,7 @@ import db from "@/src/providers/db.provider";
 import { imageRepository } from "@/src/repositories/image.repository";
 import { creditRepository } from "@/src/repositories/credits.repository";
 import { checkImageRateLimit } from "@/src/middlewares/rate-limit";
+import { ImageGenerateSchema } from "@/src/schemas/image.schema";
 import { logger } from "@/src/lib/logger";
 import { ProviderError } from "@/src/lib/errors";
 import { withTimeout, TIMEOUTS } from "@/src/lib/timeout";
@@ -78,6 +79,19 @@ export async function generateImageAi(imagePrompt: string, requestId?: string) {
     return { success: false, _id: null, credits: null };
   }
 
+  // Validate before spending rate-limit quota or credits
+  const parsed = ImageGenerateSchema.safeParse({ prompt: imagePrompt });
+  if (!parsed.success) {
+    return {
+      success: false,
+      _id: null,
+      credits: null,
+      invalidPrompt: true,
+      error: parsed.error.issues[0].message,
+    };
+  }
+  const prompt = parsed.data.prompt;
+
   // ⭐ Rate limit BEFORE touching DB / credits: 20 image generations per day per user
   const rateLimit = await checkImageRateLimit(userEmail);
   if (!rateLimit.success) {
@@ -95,6 +109,9 @@ export async function generateImageAi(imagePrompt: string, requestId?: string) {
       retryAfter: rateLimit.reset,
     };
   }
+
+  // Set once the credit is taken, so a later failure knows to refund it
+  let charged = false;
 
   try {
     const tDb = nowMs();
@@ -127,10 +144,12 @@ export async function generateImageAi(imagePrompt: string, requestId?: string) {
       };
     }
 
+    charged = true;
+
     // STEP 2 — Generate Image (credit already deducted)
     logger.debug("Generating image with Replicate", { requestId });
     const input = {
-      prompt: imagePrompt,
+      prompt,
       output_format: "png",
       output_quality: 80,
       aspect_ratio: "16:9",
@@ -195,7 +214,7 @@ export async function generateImageAi(imagePrompt: string, requestId?: string) {
       userEmail,
       userName,
       url: cloudinaryUrl,
-      name: imagePrompt,
+      name: prompt,
     });
     saveMs = nowMs() - tSave;
 
@@ -229,6 +248,24 @@ export async function generateImageAi(imagePrompt: string, requestId?: string) {
     status = "fail";
     errorName = err instanceof Error ? err.name : "UnknownError";
     logger.error("Image generation error", { err, userEmail, requestId });
+
+    // The credit was taken before calling Replicate; give it back
+    if (charged) {
+      try {
+        await creditRepository.refundCredits(
+          userEmail,
+          IMAGE_GENERATION_CREDIT_COST,
+          requestId
+        );
+      } catch (refundErr) {
+        logger.error("Failed to refund credit after image generation error", {
+          err: refundErr,
+          userEmail,
+          requestId,
+        });
+      }
+    }
+
     throw err instanceof Error ? err : new Error(String(err));
   } finally {
     if (METRICS_ENABLED) {

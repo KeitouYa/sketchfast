@@ -9,8 +9,9 @@ export async function withTimeout<T>(
   errorMessage = "Operation timed out",
   requestId?: string
 ): Promise<T> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
   const timeout = new Promise<never>((_, reject) => {
-    setTimeout(() => {
+    timer = setTimeout(() => {
       reject(new Error(`${errorMessage} (${timeoutMs}ms)`));
     }, timeoutMs);
   });
@@ -20,6 +21,9 @@ export async function withTimeout<T>(
   } catch (err) {
     logger.error("Operation timeout", { errorMessage, timeoutMs, requestId, err });
     throw err;
+  } finally {
+    // Don't keep the process busy until the timer fires after the work is done
+    clearTimeout(timer);
   }
 }
 

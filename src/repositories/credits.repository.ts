@@ -114,6 +114,31 @@ export const creditRepository = {
   },
 
   // ------------------------------------------------
+  // Give credits back after a failed generation
+  // Returns the new balance (null if the user has no record)
+  // ------------------------------------------------
+  async refundCredits(
+    userEmail: string,
+    creditAmount: number,
+    requestId?: string
+  ): Promise<number | null> {
+    const result = await Credit.findOneAndUpdate(
+      { userEmail },
+      { $inc: { credits: creditAmount } },
+      { new: true }
+    ).lean();
+
+    const remaining = (result as any)?.credits ?? null;
+    logger.info("Credits refunded", {
+      userEmail,
+      refunded: creditAmount,
+      remaining,
+      requestId,
+    });
+    return remaining;
+  },
+
+  // ------------------------------------------------
   // Ensure record exists (e.g., give 10 free credits)
   // ------------------------------------------------
   async ensureInitialCredits(userEmail: string) {
