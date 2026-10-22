@@ -16,6 +16,7 @@ const isProtectedApiRoute = createRouteMatcher([
   "/api/credits(.*)",
   "/api/user(.*)",
   "/api/history(.*)",
+  "/api/paypal(.*)",
 ]);
 
 // Admin-only routes

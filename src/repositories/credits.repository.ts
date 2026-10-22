@@ -1,6 +1,9 @@
 import Credit from "@/src/models/credit.model";
 import { logger } from "@/src/lib/logger";
 
+// Free credits for a new user's first login
+const INITIAL_FREE_CREDITS = 20;
+
 export const creditRepository = {
   // ------------------------------------------------
   // Fetch single user's credit record
@@ -11,30 +14,6 @@ export const creditRepository = {
     // .lean(): return a plain JavaScript object (not a Mongoose document, better performance)
     const credit = await Credit.findOne({ userEmail }).lean();
     return credit ? JSON.parse(JSON.stringify(credit)) : null;
-  },
-
-  // ------------------------------------------------
-  // Add credits (purchase)
-  // Handles both create + update logic
-  // ------------------------------------------------
-  async addCredits(userEmail: string, amount: number, credits: number) {
-    let record = await Credit.findOne({ userEmail });
-
-    if (record) {
-      record.amount += amount;
-      record.credits += credits;
-      await record.save(); //save into database
-      return record.toObject(); //return a object data
-    }
-
-    // Create new record if none exists
-    const newRecord = await Credit.create({
-      userEmail,
-      amount,
-      credits,
-    });
-
-    return newRecord.toObject();
   },
 
   // ------------------------------------------------
@@ -121,7 +100,7 @@ export const creditRepository = {
   },
 
   // ------------------------------------------------
-  // Ensure record exists (e.g., give 10 free credits)
+  // Ensure record exists (new users get INITIAL_FREE_CREDITS)
   // ------------------------------------------------
   async ensureInitialCredits(userEmail: string) {
     const existing = await Credit.findOne({ userEmail });
@@ -129,7 +108,7 @@ export const creditRepository = {
       return await Credit.create({
         userEmail,
         amount: 0,
-        credits: 50,
+        credits: INITIAL_FREE_CREDITS,
       });
     }
 

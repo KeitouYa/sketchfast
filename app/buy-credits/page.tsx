@@ -5,11 +5,10 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import toast from "react-hot-toast";
 
-import { saveCreditToDb } from "@/src/services/payment.service";
-
 import Loader from "@/components/ui/loader";
 import { useCredits } from "@/hooks/useCredits";
 import PaypalProvider from "@/context/paypal";
+import { CREDIT_PACKAGES, type CreditPackage } from "@/src/lib/credit-packages";
 
 export default function BuyCreditsPage() {
   return (
@@ -23,34 +22,40 @@ function BuyCredits() {
   const [{ isPending }] = usePayPalScriptReducer();
 
   // 默认选项是第一个
-  const [selected, setSelected] = React.useState({ credits: 10, price: 1 });
+  const [selected, setSelected] = React.useState<CreditPackage>(CREDIT_PACKAGES[0]);
 
   const { credits, getUserCredits } = useCredits();
 
-  const creditOptions = [
-    { credits: 10, price: 1 },
-    { credits: 20, price: 2 },
-    { credits: 50, price: 5 },
-  ];
+  // The server prices the order; the browser only says which package
+  const createOrder = async () => {
+    const res = await fetch("/api/paypal/orders", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ packageId: selected.id }),
+    });
+    const data = await res.json();
+    if (!data.success) throw new Error(data.error || "Failed to create order");
+    return data.data.orderId as string;
+  };
 
-  const handleSuccess = async (details: any) => {
-    // console.log("details => ", details);
-    const amount = parseFloat(details.purchase_units[0].amount.value);
-    const credits = parseInt(details.purchase_units[0].custom_id, 10);
-
-    //save credit to db
+  // The server captures the payment and adds the credits
+  const handleApprove = async (orderId: string) => {
     try {
-      await saveCreditToDb(amount, credits);
-      getUserCredits(); //更新上下文
-      //get user credits from db
-      toast.success(`Successfully purchased ${credits} credits.`);
+      const res = await fetch(`/api/paypal/orders/${orderId}/capture`, {
+        method: "POST",
+      });
+      const data = await res.json();
+      if (!data.success) throw new Error(data.error || "Failed to capture order");
+
+      await getUserCredits();
+      toast.success(`Successfully purchased ${selected.credits} credits.`);
     } catch (err) {
       console.error("err => ", err);
-      toast.error("An error occurred. Please try again.");
+      toast.error("Could not confirm the payment. Please try again.");
     }
   };
 
-  const handleError = (err: any) => {
+  const handleError = (err: unknown) => {
     console.error("err => ", err);
     toast.error("An error occurred. Please try again.");
   };
@@ -75,14 +80,12 @@ function BuyCredits() {
         <CardContent>
           <div className="flex flex-col gap-3 mb-8">
             {/* 读取积分选项数据 */}
-            {creditOptions.map((option) => (
+            {CREDIT_PACKAGES.map((option) => (
               <Button
-                key={option.credits}
+                key={option.id}
                 onClick={() => setSelected(option)}
-                variant={
-                  selected.credits === option.credits ? "default" : "outline"
-                }
-                className={`h-14 text-lg transition-all ${selected.credits === option.credits ? 'ring-2 ring-primary ring-offset-2 ring-offset-background' : 'hover:border-primary/50'}`}
+                variant={selected.id === option.id ? "default" : "outline"}
+                className={`h-14 text-lg transition-all ${selected.id === option.id ? 'ring-2 ring-primary ring-offset-2 ring-offset-background' : 'hover:border-primary/50'}`}
               >
                 {option.credits} Credits - ${option.price}
               </Button>
@@ -90,28 +93,12 @@ function BuyCredits() {
           </div>
 
           <div className="relative z-0">
-            {/*The key is import */}
+            {/* key: re-mount the buttons so createOrder sees the new package */}
             <PayPalButtons
-              key={selected.credits}
-              createOrder={(date, actions: any) => {
-                const price = selected.price.toFixed(2);
-                const credits = selected.credits.toString();
-
-                return actions.order.create({
-                  purchase_units: [
-                    {
-                      amount: {
-                        currency_code: "AUD",
-                        value: price,
-                      },
-                      custom_id: credits,
-                    },
-                  ],
-                });
-              }}
-              onApprove={async (data, actions: any) => {
-                const details = await actions.order.capture();
-                handleSuccess(details);
+              key={selected.id}
+              createOrder={createOrder}
+              onApprove={async (data) => {
+                await handleApprove(data.orderID);
               }}
               onError={handleError}
             />

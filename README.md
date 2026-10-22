@@ -28,6 +28,7 @@ A full-stack SaaS application for AI image generation and chat, with a pay-per-u
 
 ### Security
 
+- **Server-side Payment Verification**: PayPal orders are priced and captured on the server (Orders v2 API); the browser only picks a package. A unique order id plus a `created → completed` status guard, applied in one MongoDB transaction with the credit update, means an order is credited exactly once
 - **Clerk Authentication**: pages and API routes are protected in middleware
 - **Role-Based Access**: a role hierarchy (ADMIN > SUBSCRIBER > USER) is checked inside admin API routes; admin features are API-only
 - **Input Validation**: Zod schemas for chat messages and image prompts
@@ -44,7 +45,7 @@ A full-stack SaaS application for AI image generation and chat, with a pay-per-u
 | Auth | Clerk |
 | AI Services | Google Gemini, OpenAI (fallback), Replicate (FLUX Schnell) |
 | Storage | Cloudinary |
-| Payment | PayPal |
+| Payment | PayPal (Orders v2 REST API) |
 | Testing | Jest |
 
 ## Architecture
@@ -52,7 +53,7 @@ A full-stack SaaS application for AI image generation and chat, with a pay-per-u
 ```
 Client (React)
   │
-  ├─ fetch ─────────────► API Route /api/chat ─► chat.controller (Zod)
+  ├─ fetch ─────────────► API Routes /api/chat, /api/paypal/* ─► controllers (Zod)
   │                                                     │
   └─ Server Actions ────► image.service / payment.service
      Server Components                                  │
@@ -103,6 +104,27 @@ if (charged) {
 }
 ```
 
+### Crediting a Purchase Exactly Once
+
+```typescript
+// src/repositories/payment.repository.ts
+// The CREATED → COMPLETED guard makes a repeated capture of the same order a no-op
+await session.withTransaction(async () => {
+  const payment = await Payment.findOneAndUpdate(
+    { orderId, status: PaymentStatus.CREATED },
+    { $set: { status: PaymentStatus.COMPLETED, captureId, completedAt: new Date() } },
+    { new: true, session }
+  );
+  if (!payment) return; // already credited
+
+  await Credit.findOneAndUpdate(
+    { userEmail: payment.userEmail },
+    { $inc: { credits: payment.credits, amount: Number(payment.amount) } },
+    { upsert: true, new: true, session }
+  );
+});
+```
+
 ### Image Generation with a Timeout
 
 ```typescript
@@ -131,6 +153,7 @@ logger.info("➡️ POST /api/chat", { requestId });
 ├── app/                    # Next.js App Router
 │   ├── api/
 │   │   ├── chat/           # AI chat endpoint
+│   │   ├── paypal/         # Server-side PayPal order creation and capture
 │   │   └── admin/          # Admin-only stats and user list
 │   ├── chat/               # Chat page
 │   ├── dashboard/          # The user's images
@@ -198,6 +221,8 @@ UPSTASH_REDIS_REST_TOKEN=...
 
 # Payment
 NEXT_PUBLIC_PAYPAL_CLIENT_ID=...
+PAYPAL_CLIENT_SECRET=...
+PAYPAL_ENV=sandbox   # or live; must match the client id and secret
 ```
 
 ### Run Development Server
@@ -214,18 +239,17 @@ Open [http://localhost:3000](http://localhost:3000)
 npm test
 ```
 
-Jest unit tests cover the chat and image services: credit deduction, refunds on failure, provider fallback, prompt validation and the daily rate limit.
+Jest unit tests cover the chat and image services (credit deduction, refunds on failure, provider fallback, prompt validation, the daily rate limit) and the PayPal purchase flow (server-side pricing, order ownership, repeated and pending captures, amount mismatch).
 
 ## Features
 
 - **AI Chat**: conversations with Gemini, falling back to OpenAI, with cached replies
 - **Image Generation**: text-to-image with Replicate's FLUX Schnell, stored in Cloudinary
-- **Credit System**: new users get 50 free credits; each image or chat reply costs 1 credit and is refunded if generation fails
-- **Credit Purchase**: buy credit packs with PayPal
+- **Credit System**: new users get 20 free credits; each image or chat reply costs 1 credit and is refunded if generation fails
+- **Credit Purchase**: packs of 10, 30 or 60 credits via PayPal; the server creates and captures the order and credits the account once
 - **User Dashboard**: browse your generated images, download them, or share a public link
 - **Admin API**: platform stats and user list, for the admin role only
 
 ## Roadmap
 
-- Server-side PayPal order verification with idempotent crediting
 - Comic storyboard generation: one character kept consistent across a four-panel page

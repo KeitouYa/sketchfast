@@ -4,30 +4,9 @@ import db from "@/src/providers/db.provider";
 import { currentUser } from "@clerk/nextjs/server";
 import { creditRepository } from "@/src/repositories/credits.repository";
 
-/**
- * Add purchased credits to user's account
- */
-export const saveCreditToDb = async (amount: number, credits: number) => {
-  try {
-    await db();
-    const user = await currentUser();
-    const userEmail = user?.emailAddresses[0]?.emailAddress;
-
-    if (!userEmail) throw new Error("User email not found");
-
-    const updated = await creditRepository.addCredits(
-      userEmail,
-      amount,
-      credits
-    );
-
-    // MUST sanitize for Next.js client components
-    return updated ? JSON.parse(JSON.stringify(updated)) : null;
-  } catch (err) {
-    console.error("🔴 SAVE CREDIT ERROR:", err);
-    throw new Error("Failed to save credits");
-  }
-};
+// Buying credits goes through /api/paypal (src/services/paypal.service.ts).
+// It must never be a Server Action here: every export of this module is a
+// public endpoint, and the amount would come from the browser.
 
 /**
  * Get user's current credits
