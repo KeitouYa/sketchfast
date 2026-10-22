@@ -14,6 +14,8 @@ import { imageRepository } from "@/src/repositories/image.repository";
 import { creditRepository } from "@/src/repositories/credits.repository";
 import { checkImageRateLimit } from "@/src/middlewares/rate-limit";
 import { logger } from "@/src/lib/logger";
+import { ProviderError } from "@/src/lib/errors";
+import { withTimeout, TIMEOUTS } from "@/src/lib/timeout";
 import { trackCost } from "@/src/services/cost-tracking.service";
 
 const IMAGE_GENERATION_CREDIT_COST = 1;
@@ -134,15 +136,43 @@ export async function generateImageAi(imagePrompt: string, requestId?: string) {
       aspect_ratio: "16:9",
     };
 
+    // replicate.run() (SDK 1.4.0) came back null for this model after ~60s,
+    // so create the prediction and wait on it ourselves.
     const tReplicate = nowMs();
-    const output: any = await replicate.run("black-forest-labs/flux-schnell", {
+    const prediction = await replicate.predictions.create({
+      model: "black-forest-labs/flux-schnell",
       input,
     });
+    let finished;
+    try {
+      finished = await withTimeout(
+        replicate.wait(prediction),
+        TIMEOUTS.IMAGE_GENERATION,
+        "Replicate prediction timeout",
+        requestId
+      );
+    } catch (err) {
+      // Stop paying for a prediction nobody will read
+      await replicate.predictions.cancel(prediction.id).catch(() => {});
+      throw err;
+    }
     replicateMs = nowMs() - tReplicate;
+
+    if (finished.status !== "succeeded") {
+      throw new ProviderError(
+        `Replicate prediction ${finished.status}: ${String(finished.error ?? "no error message")}`
+      );
+    }
+    const output = finished.output as string[] | string | null;
+    const imageUrl = Array.isArray(output) ? output[0] : output;
+    if (!imageUrl) throw new ProviderError("Replicate returned no image");
 
     //STEP 3 — Download Image from Replicate
     const tDownload = nowMs();
-    const response = await fetch(output[0]);
+    const response = await fetch(imageUrl);
+    if (!response.ok) {
+      throw new ProviderError(`Failed to download generated image (${response.status})`);
+    }
     const buffer = await response.arrayBuffer();
     const nodeBuffer = Buffer.from(buffer);
     downloadMs = nowMs() - tDownload;
