@@ -38,24 +38,6 @@ export const creditRepository = {
   },
 
   // ------------------------------------------------
-  // Update credits (e.g., -1 credit for image generation)
-  // Safe: if missing, auto-create a record
-  // ------------------------------------------------
-  async updateCredit(
-    userEmail: string,
-    amountDelta: number,
-    creditDelta: number
-  ) {
-    const updated = await Credit.findOneAndUpdate(
-      { userEmail },
-      { $inc: { amount: amountDelta, credits: creditDelta } },
-      { new: true, upsert: true } // ⭐ upsert ensures record always exists
-    ).lean();
-
-    return updated;
-  },
-
-  // ------------------------------------------------
   // ATOMIC: Deduct credits only if sufficient balance exists
   // Prevents race conditions by checking + deducting in single operation
   // Returns { success: boolean, remainingCredits: number | null }

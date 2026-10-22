@@ -8,7 +8,6 @@ import { creditRepository } from "@/src/repositories/credits.repository";
  * Add purchased credits to user's account
  */
 export const saveCreditToDb = async (amount: number, credits: number) => {
-  console.log("NEXT_RUNTIME =", process.env.NEXT_RUNTIME);
   try {
     await db();
     const user = await currentUser();

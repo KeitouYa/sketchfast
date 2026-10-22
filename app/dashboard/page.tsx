@@ -19,7 +19,6 @@ interface DashboardProps {
 }
 
 export default async function Dashboard({ searchParams }: DashboardProps) {
-  console.log("✅NEXT_RUNTIME =", process.env.NEXT_RUNTIME); //
   const { page } = await searchParams;
 
   // ✅ 安全把字符串转为数字，默认 1

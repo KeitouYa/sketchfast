@@ -73,35 +73,4 @@ export async function requireAdmin(requestId?: string): Promise<void> {
   return requireRole(UserRole.ADMIN, requestId);
 }
 
-/**
- * Check if user is subscriber or higher
- */
-export async function requireSubscriber(requestId?: string): Promise<void> {
-  return requireRole(UserRole.SUBSCRIBER, requestId);
-}
-
-/**
- * Get user role without throwing
- */
-export async function getUserRole(
-  requestId?: string
-): Promise<UserRole | null> {
-  try {
-    await db();
-
-    const user = await currentUser();
-    const userEmail = user?.emailAddresses[0]?.emailAddress;
-
-    if (!userEmail) {
-      return null;
-    }
-
-    const dbUser = await userRepository.findByEmail(userEmail);
-    return (dbUser?.role as UserRole) || UserRole.USER;
-  } catch (err) {
-    logger.error("Failed to get user role", { err, requestId });
-    return null;
-  }
-}
-
 

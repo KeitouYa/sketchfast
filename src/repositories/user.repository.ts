@@ -1,5 +1,4 @@
 import User, { UserRole } from "@/src/models/user.model";
-import { logger } from "@/src/lib/logger";
 
 export const userRepository = {
   // ------------------------------------------------
@@ -64,33 +63,6 @@ export const userRepository = {
     ).lean();
 
     return JSON.parse(JSON.stringify(user));
-  },
-
-  // ------------------------------------------------
-  // Update user role
-  // ------------------------------------------------
-  async updateRole(userEmail: string, role: UserRole, requestId?: string) {
-    const user = await User.findOneAndUpdate(
-      { userEmail },
-      { role },
-      { new: true, runValidators: true }
-    ).lean();
-
-    if (!user) {
-      logger.warn("User not found for role update", { userEmail, role, requestId });
-      return null;
-    }
-
-    logger.info("User role updated", { userEmail, role, requestId });
-    return JSON.parse(JSON.stringify(user));
-  },
-
-  // ------------------------------------------------
-  // Check if user has role
-  // ------------------------------------------------
-  async hasRole(userEmail: string, role: UserRole): Promise<boolean> {
-    const user = await User.findOne({ userEmail }).lean();
-    return ((user as any)?.role as UserRole) === role;
   },
 };
 

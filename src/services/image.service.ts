@@ -4,7 +4,6 @@
  */
 
 import { auth, currentUser } from "@clerk/nextjs/server";
-import { redirect } from "next/navigation";
 import Replicate from "replicate";
 import { v2 as cloudinary } from "cloudinary";
 import { nanoid } from "nanoid";
@@ -30,15 +29,6 @@ function nowMs() {
 }
 
 // ---------------------------
-// Type Definitions
-// ---------------------------
-interface UserCredit {
-  userEmail: string;
-  credits: number;
-  amount: number;
-}
-
-// ---------------------------
 // AI + Cloudinary Setup
 // ---------------------------
 const replicate = new Replicate({
@@ -55,7 +45,6 @@ cloudinary.config({
 // generateImageAi()
 // =====================================================================
 export async function generateImageAi(imagePrompt: string, requestId?: string) {
-  console.log("NEXT_RUNTIME =", process.env.NEXT_RUNTIME);
   const t0 = nowMs();
   
   // Metrics tracking variables

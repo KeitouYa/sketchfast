@@ -75,13 +75,6 @@ export const cache = {
     const normalized = prompt.toLowerCase().trim().replace(/\s+/g, "_");
     return `prompt:${normalized}`;
   },
-
-  /**
-   * Generate cache key for user credits
-   */
-  creditsKey(userEmail: string): string {
-    return `credits:${userEmail}`;
-  },
 };
 
 

@@ -123,26 +123,6 @@ export async function trackCost(
 }
 
 /**
- * Get total costs for a user
- */
-export async function getUserTotalCost(
-  userEmail: string
-): Promise<number> {
-  try {
-    await db();
-    const result = await CostTracking.aggregate([
-      { $match: { userEmail } },
-      { $group: { _id: null, total: { $sum: "$cost" } } },
-    ]);
-
-    return result[0]?.total || 0;
-  } catch (err) {
-    logger.error("Failed to get user total cost", { err, userEmail });
-    return 0;
-  }
-}
-
-/**
  * Get platform total costs
  */
 export async function getPlatformTotalCost(): Promise<number> {

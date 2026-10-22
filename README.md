@@ -1,10 +1,10 @@
 # AI Image Generator & Chat Platform
 
-A production-ready SaaS application featuring AI-powered image generation and intelligent chat, built with modern full-stack technologies and enterprise-grade architecture.
+A full-stack SaaS application for AI image generation and chat, with a pay-per-use credit system, built on Next.js 15 with a layered backend.
 
 ![Next.js](https://img.shields.io/badge/Next.js-15.5.7-black?logo=next.js)
 ![TypeScript](https://img.shields.io/badge/TypeScript-5.0-blue?logo=typescript)
-![MongoDB](https://img.shields.io/badge/MongoDB-8.0-green?logo=mongodb)
+![Mongoose](https://img.shields.io/badge/Mongoose-8-green?logo=mongodb)
 ![React](https://img.shields.io/badge/React-19-61DAFB?logo=react)
 
 **Live Demo**: [https://ai-image-chat-saas.vercel.app/](https://ai-image-chat-saas.vercel.app/)
@@ -13,23 +13,24 @@ A production-ready SaaS application featuring AI-powered image generation and in
 
 ### Architecture & Design Patterns
 
-- **Layered Architecture**: Clean separation with `API Route → Controller → Service → Repository → Model`
-- **Factory Pattern**: Dynamic AI provider switching with automatic failover
-- **Atomic Operations**: MongoDB `$gte` operator prevents credit race conditions
-- **Request Tracing**: Unique `requestId` (nanoid) propagates through entire request lifecycle
+- **Layered Backend**: `Route / Server Action → Service → Repository → Model`. Chat goes through an API route and a controller that validates input; image generation and credits are Server Actions.
+- **Factory Pattern**: AI providers (Gemini, OpenAI) sit behind one interface and are picked at runtime
+- **Atomic Operations**: credits are deducted with a single conditional MongoDB update (`credits: { $gte: cost }`), so concurrent requests can't overspend
+- **Request Tracing**: chat requests carry a `requestId` (nanoid) from the route through controller, service and repository logs
 
 ### Performance & Reliability
 
-- **Multi-Provider Failover**: Gemini → OpenAI automatic fallback on failure
-- **Redis Caching**: 24-hour response cache with Upstash Redis
-- **Timeout Protection**: 30s for AI calls, 2min for image generation
-- **Rate Limiting**: Token bucket algorithm with configurable limits
+- **Multi-Provider Failover**: Gemini → OpenAI fallback, each call with a 30s timeout
+- **Refund on Failure**: if image generation fails after the credit was taken, or every chat provider fails, the credit is refunded
+- **Redis Caching**: chat replies are cached for 24 hours in Upstash Redis
+- **Timeouts**: 30s per AI chat call, 120s for image generation; a prediction that times out is cancelled
+- **Rate Limiting**: per-user daily cap on image generation (20/day, Upstash fixed window)
 
 ### Security
 
-- **RBAC Authorization**: Three-tier role system (USER/SUBSCRIBER/ADMIN)
-- **Clerk Authentication**: Secure user management with webhook integration
-- **Input Validation**: Zod schemas for all API endpoints
+- **Clerk Authentication**: pages and API routes are protected in middleware
+- **Role-Based Access**: a role hierarchy (ADMIN > SUBSCRIBER > USER) is checked inside admin API routes; admin features are API-only
+- **Input Validation**: Zod schemas for chat messages and image prompts
 
 ## Tech Stack
 
@@ -37,48 +38,32 @@ A production-ready SaaS application featuring AI-powered image generation and in
 |----------|-------------|
 | Frontend | Next.js 15 (App Router), React 19, TypeScript 5 |
 | Styling | Tailwind CSS 4, Radix UI, shadcn/ui |
-| Backend | Next.js API Routes, Node.js |
-| Database | MongoDB 8, Mongoose ODM |
-| Caching | Upstash Redis |
+| Backend | Next.js API Routes and Server Actions (Node.js) |
+| Database | MongoDB (Atlas), Mongoose 8 |
+| Caching / Rate Limiting | Upstash Redis |
 | Auth | Clerk |
-| AI Services | Google Gemini, OpenAI (fallback), Replicate (Flux Schnell) |
+| AI Services | Google Gemini, OpenAI (fallback), Replicate (FLUX Schnell) |
 | Storage | Cloudinary |
 | Payment | PayPal |
+| Testing | Jest |
 
 ## Architecture
 
 ```
-┌─────────────────────────────────────────────────────────────┐
-│                        Client (React)                        │
-└─────────────────────────┬───────────────────────────────────┘
-                          │
-┌─────────────────────────▼───────────────────────────────────┐
-│                    Next.js API Routes                        │
-│  ┌─────────────┐  ┌─────────────┐  ┌─────────────────────┐  │
-│  │ /api/chat   │  │ /api/image  │  │ /api/credits        │  │
-│  └──────┬──────┘  └──────┬──────┘  └──────────┬──────────┘  │
-└─────────┼────────────────┼────────────────────┼─────────────┘
-          │                │                    │
-┌─────────▼────────────────▼────────────────────▼─────────────┐
-│                     Controller Layer                         │
-│         (Request validation, Error handling)                 │
-└─────────┬────────────────┬────────────────────┬─────────────┘
-          │                │                    │
-┌─────────▼────────────────▼────────────────────▼─────────────┐
-│                      Service Layer                           │
-│    (Business logic, AI provider orchestration, Caching)      │
-└─────────┬────────────────┬────────────────────┬─────────────┘
-          │                │                    │
-┌─────────▼────────────────▼────────────────────▼─────────────┐
-│                    Repository Layer                          │
-│              (Data access, Atomic operations)                │
-└─────────┬────────────────┬────────────────────┬─────────────┘
-          │                │                    │
-┌─────────▼────────┐ ┌─────▼─────┐ ┌───────────▼─────────────┐
-│    MongoDB       │ │   Redis   │ │   External Services     │
-│  (Users, Images, │ │  (Cache)  │ │ (Gemini, OpenAI,        │
-│   Credits)       │ │           │ │  Replicate, Cloudinary) │
-└──────────────────┘ └───────────┘ └─────────────────────────┘
+Client (React)
+  │
+  ├─ fetch ─────────────► API Route /api/chat ─► chat.controller (Zod)
+  │                                                     │
+  └─ Server Actions ────► image.service / payment.service
+     Server Components                                  │
+                                                        ▼
+                                  Service layer: credits, rate limit,
+                                  provider fallback, refunds, caching
+                                                        │
+              ┌─────────────────────────────────────────┼──────────────────────┐
+              ▼                                         ▼                      ▼
+   Repositories → MongoDB                      Upstash Redis          Gemini · OpenAI ·
+   (users, credits, images, costs)             (cache, rate limit)    Replicate · Cloudinary
 ```
 
 ## Key Implementation Details
@@ -86,64 +71,86 @@ A production-ready SaaS application featuring AI-powered image generation and in
 ### AI Provider Failover
 
 ```typescript
-// Automatic failover from Gemini to OpenAI
-async function generateResponse(prompt: string): Promise<string> {
+// src/services/chat.service.ts (simplified)
+for (const provider of providers) {            // e.g. ["gemini", "openai"]
   try {
-    return await geminiProvider.generate(prompt);
-  } catch (error) {
-    logger.warn('Gemini failed, falling back to OpenAI');
-    return await openaiProvider.generate(prompt);
+    const ai = await getAIProvider(provider);
+    const reply = await withTimeout(ai.chat(message), TIMEOUTS.AI_CHAT, `AI provider ${provider} timeout`);
+    return { reply, providerUsed: provider, fallbackUsed: provider !== primary };
+  } catch (err) {
+    if (provider === providers[providers.length - 1]) {
+      throw new ProviderError("All AI providers failed");
+    }
   }
 }
 ```
 
-### Atomic Credit Deduction
+### Atomic Credit Deduction and Refund
 
 ```typescript
-// Prevents race conditions with atomic MongoDB operation
+// src/repositories/credits.repository.ts
+// Only matches when the balance covers the cost, so two concurrent requests can't both spend the last credit
 const result = await Credit.findOneAndUpdate(
-  { userEmail, credits: { $gte: cost } },  // Only if sufficient credits
+  { userEmail, credits: { $gte: cost } },
   { $inc: { credits: -cost } },
   { new: true }
-);
-if (!result) throw new InsufficientCreditsError();
+).lean();
+
+// src/services/image.service.ts
+// If anything after the deduction fails (Replicate, download, upload, save), the credit is given back
+if (charged) {
+  await creditRepository.refundCredits(userEmail, IMAGE_GENERATION_CREDIT_COST, requestId);
+}
+```
+
+### Image Generation with a Timeout
+
+```typescript
+// src/services/image.service.ts
+const prediction = await replicate.predictions.create({ model: "black-forest-labs/flux-schnell", input });
+try {
+  finished = await withTimeout(replicate.wait(prediction), TIMEOUTS.IMAGE_GENERATION, "Replicate prediction timeout");
+} catch (err) {
+  await replicate.predictions.cancel(prediction.id).catch(() => {}); // stop paying for a stuck prediction
+  throw err;
+}
 ```
 
 ### Request Tracing
 
 ```typescript
-// Unique ID propagates through entire request lifecycle
-const requestId = nanoid();
-logger.info({ requestId, action: 'chat_request' });
-// ... all subsequent logs include requestId
+// app/api/chat/route.ts
+const requestId = req.headers.get("x-request-id") || nanoid();
+logger.info("➡️ POST /api/chat", { requestId });
+// passed on to the controller, service and repository, so every log line of the request carries it
 ```
 
 ## Project Structure
 
 ```
 ├── app/                    # Next.js App Router
-│   ├── api/                # API endpoints
+│   ├── api/
 │   │   ├── chat/           # AI chat endpoint
-│   │   ├── image/          # Image generation endpoint
-│   │   └── credits/        # Credit management
+│   │   └── admin/          # Admin-only stats and user list
 │   ├── chat/               # Chat page
-│   ├── dashboard/          # User dashboard
-│   └── buy-credits/        # Payment page
+│   ├── dashboard/          # The user's images
+│   ├── image/[_id]/        # Public share page
+│   └── buy-credits/        # Credit purchase (PayPal)
 │
 ├── src/
-│   ├── controllers/        # Request handling
-│   ├── services/           # Business logic
-│   ├── repositories/       # Data access layer
-│   ├── models/             # MongoDB schemas
-│   ├── providers/          # External service integrations
-│   │   ├── ai/             # AI providers (Gemini, OpenAI)
-│   │   └── db/             # Database connection
+│   ├── controllers/        # Input validation and response shape (chat)
+│   ├── services/           # Business logic; image and payment services are Server Actions
+│   ├── repositories/       # Data access, atomic credit updates
+│   ├── models/             # Mongoose schemas
+│   ├── providers/          # AI providers (Gemini, OpenAI) and the MongoDB connection
 │   ├── middlewares/        # Rate limiting, RBAC
-│   └── lib/                # Utilities (logger, cache, errors)
+│   ├── schemas/            # Zod schemas
+│   ├── lib/                # Logger, cache, errors, timeouts
+│   └── __tests__/          # Jest tests
 │
-└── components/             # React components
-    ├── ui/                 # Base UI components
-    └── forms/              # Form components
+├── context/                # React contexts (credits, image generation, PayPal)
+├── hooks/                  # React hooks
+└── components/             # UI, layout, form and image components
 ```
 
 ## Getting Started
@@ -151,8 +158,9 @@ logger.info({ requestId, action: 'chat_request' });
 ### Prerequisites
 
 - Node.js 18+
-- MongoDB instance
-- API keys for: Clerk, Google Gemini, Replicate, Cloudinary
+- A MongoDB database (e.g. MongoDB Atlas) and an Upstash Redis database
+- API keys for: Clerk, Google Gemini, OpenAI, Replicate, Cloudinary
+- A PayPal client id, for buying credits
 
 ### Installation
 
@@ -164,9 +172,11 @@ npm install --legacy-peer-deps
 
 ### Environment Variables
 
+Copy `.env.example` to `.env.local` and fill in:
+
 ```env
 # Database
-MONGODB_URI=mongodb+srv://...
+DATABASE_URL=mongodb+srv://...
 
 # Authentication
 NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY=pk_...
@@ -182,9 +192,12 @@ CLOUDINARY_CLOUD_NAME=...
 CLOUDINARY_API_KEY=...
 CLOUDINARY_API_SECRET=...
 
-# Cache
+# Cache and rate limiting
 UPSTASH_REDIS_REST_URL=...
 UPSTASH_REDIS_REST_TOKEN=...
+
+# Payment
+NEXT_PUBLIC_PAYPAL_CLIENT_ID=...
 ```
 
 ### Run Development Server
@@ -195,11 +208,24 @@ npm run dev
 
 Open [http://localhost:3000](http://localhost:3000)
 
+### Run Tests
+
+```bash
+npm test
+```
+
+Jest unit tests cover the chat and image services: credit deduction, refunds on failure, provider fallback, prompt validation and the daily rate limit.
+
 ## Features
 
-- **AI Chat**: Intelligent conversations powered by Gemini/OpenAI with response caching
-- **Image Generation**: Text-to-image using Replicate's Flux Schnell model
-- **Credit System**: Pay-per-use model with atomic transaction handling
-- **User Dashboard**: View and manage generated images
-- **Role-Based Access**: Different permissions for users, subscribers, and admins
+- **AI Chat**: conversations with Gemini, falling back to OpenAI, with cached replies
+- **Image Generation**: text-to-image with Replicate's FLUX Schnell, stored in Cloudinary
+- **Credit System**: new users get 50 free credits; each image or chat reply costs 1 credit and is refunded if generation fails
+- **Credit Purchase**: buy credit packs with PayPal
+- **User Dashboard**: browse your generated images, download them, or share a public link
+- **Admin API**: platform stats and user list, for the admin role only
 
+## Roadmap
+
+- Server-side PayPal order verification with idempotent crediting
+- Comic storyboard generation: one character kept consistent across a four-panel page
