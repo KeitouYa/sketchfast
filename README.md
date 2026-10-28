@@ -189,13 +189,13 @@ logger.info("➡️ POST /api/chat", { requestId });
 
 ```bash
 git clone https://github.com/KeitouYa/ai-image-chat-saas.git
-cd ai-image-chat-saas
+cd ai-image-chat-saas/frontend
 npm install --legacy-peer-deps
 ```
 
 ### Environment Variables
 
-Copy `.env.example` to `.env.local` and fill in:
+In `frontend/`, copy `.env.example` to `.env.local` and fill in:
 
 ```env
 # Database
