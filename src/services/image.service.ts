@@ -17,6 +17,7 @@ import { logger } from "@/src/lib/logger";
 import { ProviderError } from "@/src/lib/errors";
 import { withTimeout, TIMEOUTS } from "@/src/lib/timeout";
 import { trackCost } from "@/src/services/cost-tracking.service";
+import { applyStyle } from "@/src/lib/style-presets";
 
 const IMAGE_GENERATION_CREDIT_COST = 1;
 
@@ -44,7 +45,11 @@ cloudinary.config({
 // =====================================================================
 // generateImageAi()
 // =====================================================================
-export async function generateImageAi(imagePrompt: string, requestId?: string) {
+export async function generateImageAi(
+  imagePrompt: string,
+  style: string = "none",
+  requestId?: string
+) {
   const t0 = nowMs();
   
   // Metrics tracking variables
@@ -69,7 +74,7 @@ export async function generateImageAi(imagePrompt: string, requestId?: string) {
   }
 
   // Validate before spending rate-limit quota or credits
-  const parsed = ImageGenerateSchema.safeParse({ prompt: imagePrompt });
+  const parsed = ImageGenerateSchema.safeParse({ prompt: imagePrompt, style });
   if (!parsed.success) {
     return {
       success: false,
@@ -138,7 +143,8 @@ export async function generateImageAi(imagePrompt: string, requestId?: string) {
     // STEP 2 — Generate Image (credit already deducted)
     logger.debug("Generating image with Replicate", { requestId });
     const input = {
-      prompt,
+      // The gallery keeps the user's own words; only the model sees the style text
+      prompt: applyStyle(prompt, parsed.data.style),
       output_format: "png",
       output_quality: 80,
       aspect_ratio: "16:9",

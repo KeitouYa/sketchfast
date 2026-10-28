@@ -87,7 +87,7 @@ describe("Image Service", () => {
   });
 
   it("generates an image through the predictions API", async () => {
-    const result = await generateImageAi(PROMPT, "req1");
+    const result = await generateImageAi(PROMPT, "none", "req1");
 
     expect(result).toEqual({ success: true, _id: "img1", credits: 9 });
     expect(replicate.predictions.create).toHaveBeenCalledWith(
@@ -106,8 +106,26 @@ describe("Image Service", () => {
     expect(creditRepository.refundCredits).not.toHaveBeenCalled();
   });
 
+  it("appends the chosen style for the model but saves the user's own prompt", async () => {
+    await generateImageAi(PROMPT, "comic", "req1");
+
+    const sent = (replicate.predictions.create as jest.Mock).mock.calls[0][0].input.prompt;
+    expect(sent.startsWith(`${PROMPT}, comic book illustration`)).toBe(true);
+    expect(imageRepository.createImage).toHaveBeenCalledWith(
+      expect.objectContaining({ name: PROMPT })
+    );
+  });
+
+  it("rejects an unknown style before using quota or credits", async () => {
+    const result = await generateImageAi(PROMPT, "vaporwave", "req1");
+
+    expect(result).toMatchObject({ success: false, invalidPrompt: true });
+    expect(checkImageRateLimit).not.toHaveBeenCalled();
+    expect(creditRepository.deductCreditsAtomic).not.toHaveBeenCalled();
+  });
+
   it("rejects an invalid prompt before using quota or credits", async () => {
-    const result = await generateImageAi("hi", "req1");
+    const result = await generateImageAi("hi", "none", "req1");
 
     expect(result).toMatchObject({ success: false, invalidPrompt: true });
     expect(checkImageRateLimit).not.toHaveBeenCalled();
@@ -122,7 +140,7 @@ describe("Image Service", () => {
       reset: 1234,
     });
 
-    const result = await generateImageAi(PROMPT, "req1");
+    const result = await generateImageAi(PROMPT, "none", "req1");
 
     expect(result).toMatchObject({ success: false, rateLimited: true, retryAfter: 1234 });
     expect(creditRepository.deductCreditsAtomic).not.toHaveBeenCalled();
@@ -134,7 +152,7 @@ describe("Image Service", () => {
       remainingCredits: 0,
     });
 
-    const result = await generateImageAi(PROMPT, "req1");
+    const result = await generateImageAi(PROMPT, "none", "req1");
 
     expect(result).toEqual({ success: false, _id: null, credits: 0 });
     expect(replicate.predictions.create).not.toHaveBeenCalled();
@@ -149,7 +167,7 @@ describe("Image Service", () => {
       output: null,
     });
 
-    await expect(generateImageAi(PROMPT, "req1")).rejects.toThrow(
+    await expect(generateImageAi(PROMPT, "none", "req1")).rejects.toThrow(
       "Replicate prediction failed"
     );
     expect(creditRepository.refundCredits).toHaveBeenCalledWith(
@@ -165,7 +183,7 @@ describe("Image Service", () => {
       new Error("Replicate prediction timeout (120000ms)")
     );
 
-    await expect(generateImageAi(PROMPT, "req1")).rejects.toThrow("timeout");
+    await expect(generateImageAi(PROMPT, "none", "req1")).rejects.toThrow("timeout");
     expect(replicate.predictions.cancel).toHaveBeenCalledWith("pred1");
     expect(creditRepository.refundCredits).toHaveBeenCalledWith(
       "test@example.com",
@@ -181,7 +199,7 @@ describe("Image Service", () => {
       })
     );
 
-    await expect(generateImageAi(PROMPT, "req1")).rejects.toThrow("upload failed");
+    await expect(generateImageAi(PROMPT, "none", "req1")).rejects.toThrow("upload failed");
     expect(creditRepository.refundCredits).toHaveBeenCalledWith(
       "test@example.com",
       1,

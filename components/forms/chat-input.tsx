@@ -4,7 +4,7 @@ import React, { useRef, useCallback } from "react";
 import { Textarea } from "@/components/ui/textarea";
 import { useAutoResize } from "@/hooks/useAutoResize";
 import { cn } from "@/src/lib/utils";
-import { ArrowUp, Loader2Icon, Paperclip } from "lucide-react";
+import { ArrowUp, Loader2Icon, Paperclip, Sparkles } from "lucide-react";
 
 interface ChatInputProps {
   value: string;
@@ -16,6 +16,9 @@ interface ChatInputProps {
   maxHeight?: number;
   size?: "default" | "lg";
   className?: string;
+  // When set, the left toolbar slot shows an "Enhance" button instead of the attach placeholder
+  onEnhance?: () => void;
+  enhancing?: boolean;
 }
 
 export function ChatInput({
@@ -28,6 +31,8 @@ export function ChatInput({
   maxHeight = 200,
   size = "default",
   className,
+  onEnhance,
+  enhancing = false,
 }: ChatInputProps) {
   const textareaRef = useRef<HTMLTextAreaElement>(null);
 
@@ -63,7 +68,7 @@ export function ChatInput({
           onChange={(e) => onChange(e.target.value)}
           onKeyDown={handleKeyDown}
           placeholder={placeholder}
-          disabled={disabled || loading}
+          disabled={disabled || loading || enhancing}
           rows={1}
           className={cn(
             "w-full border-0 bg-transparent dark:bg-transparent resize-none shadow-none",
@@ -75,22 +80,44 @@ export function ChatInput({
 
       {/* Toolbar */}
       <div className="flex items-center justify-between px-3 pb-3 pt-1">
-        {/* Left: attachment placeholder */}
-        <button
-          type="button"
-          disabled
-          className="flex items-center gap-1.5 text-muted-foreground/50 cursor-not-allowed text-xs"
-          title="Coming soon"
-        >
-          <Paperclip className="h-4 w-4" />
-          <span className="hidden sm:inline">Attach</span>
-        </button>
+        {/* Left: enhance, or the attachment placeholder */}
+        {onEnhance ? (
+          <button
+            type="button"
+            onClick={onEnhance}
+            disabled={disabled || loading || enhancing || !hasContent}
+            className={cn(
+              "flex items-center gap-1.5 rounded-full px-3 py-1.5 text-xs transition-colors",
+              hasContent && !loading && !enhancing
+                ? "text-purple-600 hover:bg-purple-500/10 dark:text-purple-400"
+                : "text-muted-foreground/50 cursor-not-allowed",
+            )}
+            title="Rewrite your idea into a detailed prompt"
+          >
+            {enhancing ? (
+              <Loader2Icon className="h-4 w-4 animate-spin" />
+            ) : (
+              <Sparkles className="h-4 w-4" />
+            )}
+            <span>{enhancing ? "Enhancing..." : "Enhance"}</span>
+          </button>
+        ) : (
+          <button
+            type="button"
+            disabled
+            className="flex items-center gap-1.5 text-muted-foreground/50 cursor-not-allowed text-xs"
+            title="Coming soon"
+          >
+            <Paperclip className="h-4 w-4" />
+            <span className="hidden sm:inline">Attach</span>
+          </button>
+        )}
 
         {/* Right: send button */}
         <button
           type="button"
           onClick={handleSubmit}
-          disabled={disabled || loading || !hasContent}
+          disabled={disabled || loading || enhancing || !hasContent}
           aria-label="Send message"
           className={cn(
             "shrink-0 h-10 w-10 rounded-full flex items-center justify-center transition-transform",

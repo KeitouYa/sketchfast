@@ -5,6 +5,7 @@ import { generateImageAi } from "@/src/services/image.service";
 import { toast } from "react-hot-toast";
 import { useRouter } from "next/navigation";
 import { useCredits } from "@/hooks/useCredits";
+import type { StyleId } from "@/src/lib/style-presets";
 
 // --- Context Type (exported for hooks/useImageGeneration.ts) ---
 export interface ImageGenerationContextType {
@@ -12,6 +13,10 @@ export interface ImageGenerationContextType {
   setImagePrompt: (query: string) => void;
   loading: boolean;
   generateImage: () => void;
+  enhancing: boolean;
+  enhancePrompt: () => void;
+  style: StyleId;
+  setStyle: (style: StyleId) => void;
 }
 
 export const ImageGenerationContext = createContext<
@@ -26,6 +31,8 @@ export const ImageGenerationProvider = ({
 }) => {
   const [imagePrompt, setImagePrompt] = useState("");
   const [loading, setLoading] = useState(false);
+  const [enhancing, setEnhancing] = useState(false);
+  const [style, setStyle] = useState<StyleId>("none");
   const router = useRouter();
 
   // Get getUserCredits from CreditsContext to refresh after generation
@@ -40,7 +47,7 @@ export const ImageGenerationProvider = ({
     setLoading(true);
 
     try {
-      const result = await generateImageAi(imagePrompt);
+      const result = await generateImageAi(imagePrompt, style);
       const { success, _id, rateLimited, invalidPrompt, error } = result as {
         success: boolean;
         _id: string | null;
@@ -71,6 +78,37 @@ export const ImageGenerationProvider = ({
     }
   };
 
+  // Rewrite the current idea into a detailed prompt the user can edit before generating
+  const enhancePrompt = async () => {
+    if (!imagePrompt.trim()) {
+      toast.error("Type an idea first");
+      return;
+    }
+
+    setEnhancing(true);
+    try {
+      const res = await fetch("/api/prompt/optimize", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ prompt: imagePrompt }),
+      });
+      if (res.status === 401) {
+        toast.error("Please sign in to enhance prompts");
+        return;
+      }
+      const body = await res.json();
+      if (!body.success) {
+        toast.error(body.error || "Could not enhance the prompt");
+        return;
+      }
+      setImagePrompt(body.data.prompt);
+    } catch {
+      toast.error("Could not enhance the prompt. Please try again.");
+    } finally {
+      setEnhancing(false);
+    }
+  };
+
   return (
     <ImageGenerationContext.Provider
       value={{
@@ -78,6 +116,10 @@ export const ImageGenerationProvider = ({
         setImagePrompt,
         loading,
         generateImage,
+        enhancing,
+        enhancePrompt,
+        style,
+        setStyle,
       }}
     >
       {children}

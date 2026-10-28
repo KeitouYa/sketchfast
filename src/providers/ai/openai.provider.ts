@@ -25,4 +25,17 @@ export class OpenAIProvider implements AIProvider {
 
     return completion.choices[0].message.content ?? "No response";
   }
+
+  async complete(instructions: string, input: string): Promise<string> {
+    const completion = await client.chat.completions.create({
+      model: this.modelName,
+      temperature: 0.7,
+      messages: [
+        { role: "system", content: instructions },
+        { role: "user", content: input },
+      ],
+    });
+
+    return (completion.choices[0].message.content ?? "").trim();
+  }
 }
