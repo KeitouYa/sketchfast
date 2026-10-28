@@ -1,0 +1,29 @@
+spring:
+  application:
+    name: aiimage
+  config:
+    # Local secrets live in backend-java/.env (gitignored); see .env.example
+    import: optional:file:.env[.properties]
+  mongodb:
+    # Needs a replica set for transactions; docker-compose.yml at the repo root starts one
+    uri: ${MONGODB_URI:mongodb://localhost:27017/aiimage?replicaSet=rs0&directConnection=true}
+  data:
+    mongodb:
+      auto-index-creation: true
+
+app:
+  clerk:
+    # e.g. https://your-app.clerk.accounts.dev (the "iss" claim of Clerk session tokens)
+    issuer: ${CLERK_ISSUER:}
+    # Origins allowed in the "azp" claim
+    authorized-parties: ${CLERK_AUTHORIZED_PARTIES:http://localhost:3000}
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health
+
+logging:
+  pattern:
+    correlation: "[%X{requestId:-}] "
