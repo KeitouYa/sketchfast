@@ -2,7 +2,8 @@ import mongoose from "mongoose";
 
 const CreditSchema = new mongoose.Schema(
   {
-    userEmail: { type: String, required: true, index: true },
+    // Unique: one record per user, even when a new user's first requests arrive at once
+    userEmail: { type: String, required: true, unique: true },
     credits: Number,
     amount: Number,
   },

@@ -4,6 +4,22 @@ import { logger } from "@/src/lib/logger";
 // Free credits for a new user's first login
 const INITIAL_FREE_CREDITS = 20;
 
+function insufficientCredits(
+  userEmail: string,
+  requested: number,
+  record: { credits?: number } | null,
+  requestId?: string
+) {
+  const available = record?.credits ?? 0;
+  logger.warn("Insufficient credits for deduction", {
+    userEmail,
+    requested,
+    available,
+    requestId,
+  });
+  return { success: false, remainingCredits: available };
+}
+
 export const creditRepository = {
   // ------------------------------------------------
   // Fetch single user's credit record
@@ -18,7 +34,8 @@ export const creditRepository = {
 
   // ------------------------------------------------
   // ATOMIC: Deduct credits only if sufficient balance exists
-  // Prevents race conditions by checking + deducting in single operation
+  // Checking and deducting is one conditional update, so concurrent requests
+  // can never overspend. An existing user costs a single round trip.
   // Returns { success: boolean, remainingCredits: number | null }
   // ------------------------------------------------
   async deductCreditsAtomic(
@@ -26,38 +43,31 @@ export const creditRepository = {
     creditAmount: number,
     requestId?: string
   ): Promise<{ success: boolean; remainingCredits: number | null }> {
-    // Ensure record exists first
-    await this.ensureInitialCredits(userEmail);
+    // Only decrements when credits >= creditAmount
+    const deduct = () =>
+      Credit.findOneAndUpdate(
+        { userEmail, credits: { $gte: creditAmount } },
+        { $inc: { credits: -creditAmount } },
+        { new: true, runValidators: true }
+      ).lean();
 
-    // Atomic operation: only decrement if credits >= creditAmount
-    const result = await Credit.findOneAndUpdate(
-      {
-        userEmail,
-        credits: { $gte: creditAmount }, // Only match if sufficient credits
-      },
-      {
-        $inc: { credits: -creditAmount },
-      },
-      {
-        new: true,
-        runValidators: true,
-      }
-    ).lean();
+    let result = await deduct();
 
     if (!result) {
-      // Insufficient credits or user not found
+      // Too few credits, or a new user who has no record yet
       const current = await Credit.findOne({ userEmail }).lean();
-      const currentCredits = (current as any)?.credits ?? 0;
-      logger.warn("Insufficient credits for deduction", {
-        userEmail,
-        requested: creditAmount,
-        available: currentCredits,
-        requestId,
-      });
-      return {
-        success: false,
-        remainingCredits: currentCredits ?? null,
-      };
+      if (current) {
+        return insufficientCredits(userEmail, creditAmount, current as { credits?: number }, requestId);
+      }
+
+      // First request from a new user: create the record with the free credits, then deduct
+      await this.ensureInitialCredits(userEmail);
+      result = await deduct();
+      if (!result) {
+        // Their other concurrent first requests already spent the free credits
+        const after = await Credit.findOne({ userEmail }).lean();
+        return insufficientCredits(userEmail, creditAmount, after as { credits?: number } | null, requestId);
+      }
     }
 
     const resultCredits = (result as any)?.credits ?? 0;
@@ -101,17 +111,22 @@ export const creditRepository = {
 
   // ------------------------------------------------
   // Ensure record exists (new users get INITIAL_FREE_CREDITS)
+  // A single upsert rather than find-then-create: concurrent first requests all
+  // land on one record, and the unique index on userEmail rejects a second insert.
   // ------------------------------------------------
   async ensureInitialCredits(userEmail: string) {
-    const existing = await Credit.findOne({ userEmail });
-    if (!existing) {
-      return await Credit.create({
-        userEmail,
-        amount: 0,
-        credits: INITIAL_FREE_CREDITS,
-      });
+    try {
+      return await Credit.findOneAndUpdate(
+        { userEmail },
+        { $setOnInsert: { credits: INITIAL_FREE_CREDITS, amount: 0 } },
+        { upsert: true, new: true }
+      ).lean();
+    } catch (err) {
+      // Another request inserted the record first; it exists now
+      if ((err as { code?: number }).code === 11000) {
+        return Credit.findOne({ userEmail }).lean();
+      }
+      throw err;
     }
-
-    return existing;
   },
 };
