@@ -291,6 +291,32 @@ class ImageFlowTest {
 		mvc.perform(get("/api/images/not-an-id")).andExpect(status().isNotFound());
 	}
 
+	@Test
+	void galleryListsOnlyFinishedImagesNewestFirst() throws Exception {
+		String first = finishedImage("first image");
+		String failed = submit("will fail", "none");
+		generator.finish(image(failed).providerJobId(), ImageGenerator.State.FAILED);
+		images.onJobUpdate(generator.fetch(image(failed).providerJobId()));
+		submit("still running", "none");
+		String second = finishedImage("second image");
+
+		mvc.perform(get("/api/me/images?size=1").with(user))
+			.andExpect(status().isOk())
+			.andExpect(jsonPath("$.total").value(2))
+			.andExpect(jsonPath("$.totalPages").value(2))
+			.andExpect(jsonPath("$.items[0].id").value(second));
+		mvc.perform(get("/api/me/images?page=2&size=1").with(user))
+			.andExpect(jsonPath("$.items[0].id").value(first));
+		mvc.perform(get("/api/me/images")).andExpect(status().isUnauthorized());
+	}
+
+	private String finishedImage(String prompt) throws Exception {
+		String id = submit(prompt, "none");
+		generator.finish(image(id).providerJobId(), ImageGenerator.State.SUCCEEDED);
+		images.onJobUpdate(generator.fetch(image(id).providerJobId()));
+		return id;
+	}
+
 	private String submit(String prompt, String style) throws Exception {
 		String body = postImage("{\"prompt\":\"" + prompt + "\",\"style\":\"" + style + "\"}")
 			.andExpect(status().isAccepted())

@@ -1,10 +1,12 @@
 package io.github.keitouya.aiimage.image;
 
 import java.time.Instant;
+import java.util.List;
 import java.util.Map;
 
 import io.github.keitouya.aiimage.common.ApiException;
 import io.github.keitouya.aiimage.common.ErrorCode;
+import io.github.keitouya.aiimage.common.Page;
 import io.github.keitouya.aiimage.image.provider.ImageGenerator;
 import io.github.keitouya.aiimage.security.CurrentUser;
 import io.github.keitouya.aiimage.webhook.ProcessedEvents;
@@ -14,6 +16,7 @@ import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestHeader;
+import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.ResponseStatus;
 import org.springframework.web.bind.annotation.RestController;
 
@@ -35,6 +38,18 @@ class ImageController {
 	@ResponseStatus(HttpStatus.ACCEPTED)
 	ImageService.Submitted generate(CurrentUser user, @RequestBody GenerateRequest request) {
 		return images.submit(user, request.prompt(), request.style());
+	}
+
+	/** The signed-in user's finished images, newest first. */
+	@GetMapping("/api/me/images")
+	Page<ImageView> gallery(CurrentUser user, @RequestParam(defaultValue = "1") int page,
+			@RequestParam(defaultValue = "12") int size) {
+		Page.Request request = Page.request(page, size);
+		List<ImageView> items = images.gallery(user.email(), request.page(), request.size())
+			.stream()
+			.map(ImageView::of)
+			.toList();
+		return Page.of(items, request, images.galleryCount(user.email()));
 	}
 
 	@GetMapping("/api/images/{id}")
