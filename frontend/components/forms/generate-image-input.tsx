@@ -4,7 +4,7 @@ import React from "react";
 import { useImageGeneration } from "@/hooks/useImageGeneration";
 import { useStyles } from "@/hooks/useStyles";
 import { ChatInput } from "@/components/forms/chat-input";
-import { cn } from "@/src/lib/utils";
+import { cn } from "@/lib/utils";
 
 export function GenerateImageInput() {
   const {

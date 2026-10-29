@@ -3,7 +3,7 @@
 import React, { useRef, useCallback } from "react";
 import { Textarea } from "@/components/ui/textarea";
 import { useAutoResize } from "@/hooks/useAutoResize";
-import { cn } from "@/src/lib/utils";
+import { cn } from "@/lib/utils";
 import { ArrowUp, Loader2Icon, Paperclip, Sparkles } from "lucide-react";
 
 interface ChatInputProps {
