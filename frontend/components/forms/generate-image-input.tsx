@@ -2,8 +2,8 @@
 
 import React from "react";
 import { useImageGeneration } from "@/hooks/useImageGeneration";
+import { useStyles } from "@/hooks/useStyles";
 import { ChatInput } from "@/components/forms/chat-input";
-import { STYLE_PRESETS } from "@/src/lib/style-presets";
 import { cn } from "@/src/lib/utils";
 
 export function GenerateImageInput() {
@@ -12,11 +12,13 @@ export function GenerateImageInput() {
     imagePrompt,
     setImagePrompt,
     loading,
+    progress,
     enhancePrompt,
     enhancing,
     style,
     setStyle,
   } = useImageGeneration();
+  const styles = useStyles();
 
   return (
     <div className="space-y-3">
@@ -32,9 +34,8 @@ export function GenerateImageInput() {
         maxHeight={400}
       />
 
-      {/* Style presets */}
       <div role="radiogroup" aria-label="Image style" className="flex flex-wrap gap-2">
-        {STYLE_PRESETS.map((preset) => {
+        {styles.map((preset) => {
           const selected = style === preset.id;
           return (
             <button
@@ -47,7 +48,7 @@ export function GenerateImageInput() {
               className={cn(
                 "rounded-full border px-3 py-1 text-sm transition-colors",
                 selected
-                  ? "border-transparent bg-gradient-to-r from-purple-600 to-indigo-500 text-white shadow-sm"
+                  ? "border-transparent bg-primary text-primary-foreground shadow-sm"
                   : "bg-white/40 text-muted-foreground hover:text-foreground dark:bg-muted/30",
               )}
             >
@@ -56,6 +57,12 @@ export function GenerateImageInput() {
           );
         })}
       </div>
+
+      {progress && (
+        <p role="status" className="text-sm text-muted-foreground">
+          {progress} This usually takes 5 to 15 seconds.
+        </p>
+      )}
     </div>
   );
 }

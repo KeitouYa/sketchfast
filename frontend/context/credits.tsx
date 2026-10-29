@@ -1,19 +1,11 @@
 "use client";
 
-import React, {
-  createContext,
-  useCallback,
-  useEffect,
-  useState,
-} from "react";
-import {
-  checkCreditRecordDb,
-  getUserCreditsFromDb,
-} from "@/src/services/payment.service";
-import { useUser } from "@clerk/nextjs";
+import React, { createContext, useCallback, useEffect, useState } from "react";
+import { useAuth } from "@clerk/nextjs";
 import { toast } from "react-hot-toast";
+import { api, errorMessage } from "@/lib/api";
 
-// --- Context Type (exported for hooks/useCredits.ts) ---
+// Exported for hooks/useCredits.ts
 export interface CreditsContextType {
   credits: number;
   getUserCredits: () => Promise<void>;
@@ -21,48 +13,26 @@ export interface CreditsContextType {
 
 export const CreditsContext = createContext<CreditsContextType | undefined>(undefined);
 
-// --- Provider ---
-export const CreditsProvider = ({
-  children,
-}: {
-  children: React.ReactNode;
-}) => {
+export const CreditsProvider = ({ children }: { children: React.ReactNode }) => {
   const [credits, setCredits] = useState(0);
-  const { isSignedIn } = useUser();
+  const { isSignedIn, getToken } = useAuth();
 
-  // useCallback: stable reference, only rebuilt when isSignedIn changes
+  // The backend opens the account (with the signup bonus) on the first read
   const getUserCredits = useCallback(async () => {
     if (!isSignedIn) return;
-
     try {
-      const credit = await getUserCreditsFromDb();
-      const creditValue = Array.isArray(credit)
-        ? credit[0]?.credits ?? 0
-        : credit?.credits ?? 0;
-      setCredits(creditValue);
+      const { balance } = await api<{ balance: number }>("/api/me/credits", { token: await getToken() });
+      setCredits(balance);
     } catch (err) {
-      console.error("Failed to get user credits:", err);
-      toast.error("Failed to get user credits");
+      toast.error(errorMessage(err));
     }
-  }, [isSignedIn]);
+  }, [isSignedIn, getToken]);
 
-  // Single useEffect: ensure record exists THEN fetch credits (fixes race condition)
   useEffect(() => {
-    if (!isSignedIn) return;
-
-    const initCredits = async () => {
-      await checkCreditRecordDb();
-      await getUserCredits();
-    };
-
-    initCredits();
-  }, [isSignedIn, getUserCredits]);
+    getUserCredits();
+  }, [getUserCredits]);
 
   return (
-    <CreditsContext.Provider value={{ credits, getUserCredits }}>
-      {children}
-    </CreditsContext.Provider>
+    <CreditsContext.Provider value={{ credits, getUserCredits }}>{children}</CreditsContext.Provider>
   );
 };
-
-// Hook moved to hooks/useCredits.ts

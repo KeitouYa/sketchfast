@@ -1,85 +1,109 @@
 "use client";
 
 import React, { createContext, useState } from "react";
-import { generateImageAi } from "@/src/services/image.service";
-import { toast } from "react-hot-toast";
+import { useAuth } from "@clerk/nextjs";
 import { useRouter } from "next/navigation";
+import { toast } from "react-hot-toast";
 import { useCredits } from "@/hooks/useCredits";
-import type { StyleId } from "@/src/lib/style-presets";
+import { api, ApiError, errorMessage } from "@/lib/api";
+import type { ImageView, SubmittedImage } from "@/lib/types";
 
-// --- Context Type (exported for hooks/useImageGeneration.ts) ---
+// Exported for hooks/useImageGeneration.ts
 export interface ImageGenerationContextType {
   imagePrompt: string;
   setImagePrompt: (query: string) => void;
   loading: boolean;
+  /** Shown while waiting for the image, e.g. "Generating…". */
+  progress: string | null;
   generateImage: () => void;
   enhancing: boolean;
   enhancePrompt: () => void;
-  style: StyleId;
-  setStyle: (style: StyleId) => void;
+  style: string;
+  setStyle: (style: string) => void;
 }
 
-export const ImageGenerationContext = createContext<
-  ImageGenerationContextType | undefined
->(undefined);
+export const ImageGenerationContext = createContext<ImageGenerationContextType | undefined>(undefined);
 
-// --- Provider ---
-export const ImageGenerationProvider = ({
-  children,
-}: {
-  children: React.ReactNode;
-}) => {
+// Generation is asynchronous: submit, then poll until the backend says SUCCEEDED or FAILED.
+// The backend fails and refunds anything unfinished after 5 minutes, so this never waits forever.
+const POLL_START_MS = 1500;
+const POLL_MAX_MS = 4000;
+const POLL_GIVE_UP_MS = 6 * 60 * 1000;
+
+const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
+
+export const ImageGenerationProvider = ({ children }: { children: React.ReactNode }) => {
   const [imagePrompt, setImagePrompt] = useState("");
   const [loading, setLoading] = useState(false);
+  const [progress, setProgress] = useState<string | null>(null);
   const [enhancing, setEnhancing] = useState(false);
-  const [style, setStyle] = useState<StyleId>("none");
+  const [style, setStyle] = useState("none");
   const router = useRouter();
-
-  // Get getUserCredits from CreditsContext to refresh after generation
+  const { isSignedIn, getToken } = useAuth();
   const { getUserCredits } = useCredits();
 
+  const waitForImage = async (id: string): Promise<ImageView> => {
+    const started = Date.now();
+    let delay = POLL_START_MS;
+    for (;;) {
+      await sleep(delay);
+      const image = await api<ImageView>(`/api/images/${id}`, { token: await getToken() });
+      if (image.status === "SUCCEEDED" || image.status === "FAILED") return image;
+      setProgress(image.status === "SAVING" ? "Saving your image…" : "Generating…");
+      if (Date.now() - started > POLL_GIVE_UP_MS) return image;
+      delay = Math.min(POLL_MAX_MS, Math.round(delay * 1.3));
+    }
+  };
+
   const generateImage = async () => {
+    if (!isSignedIn) {
+      toast.error("Sign in to generate images");
+      return;
+    }
     if (!imagePrompt.trim()) {
-      toast.error("Please enter a prompt");
+      toast.error("Please describe the image first");
       return;
     }
 
     setLoading(true);
-
+    setProgress("Starting…");
     try {
-      const result = await generateImageAi(imagePrompt, style);
-      const { success, _id, rateLimited, invalidPrompt, error } = result as {
-        success: boolean;
-        _id: string | null;
-        rateLimited?: boolean;
-        invalidPrompt?: boolean;
-        error?: string;
-      };
+      const submitted = await api<SubmittedImage>("/api/images", {
+        body: { prompt: imagePrompt, style },
+        token: await getToken(),
+      });
+      await getUserCredits();
+      const image = await waitForImage(submitted.id);
+      await getUserCredits();
 
-      if (success) {
-        await getUserCredits();
-        toast.success("🎉 Image generated!");
-        router.push(`/dashboard/image/${_id}`);
-      } else if (rateLimited) {
-        toast.error("Daily limit reached (20 images/day). Try again tomorrow.");
-      } else if (invalidPrompt) {
-        toast.error(error || "Please check your prompt.");
+      if (image.status === "SUCCEEDED") {
+        toast.success("Your image is ready");
+        router.push(`/dashboard/image/${image.id}`);
+      } else if (image.status === "FAILED") {
+        toast.error("The image couldn't be generated. Your credit has been refunded.");
       } else {
-        await getUserCredits();
-        toast.error("Insufficient credits. Please buy more credits.");
-        router.push("/buy-credits");
+        toast("Still working on it. It will appear in your dashboard when it's done.");
       }
-    } catch (err: any) {
-      if (err?.digest === "NEXT_REDIRECT") throw err;
-      console.error("Error generating image:", err);
-      toast.error("Failed to generate image. Please try again later.");
+    } catch (err) {
+      if (err instanceof ApiError && err.code === "INSUFFICIENT_CREDITS") {
+        toast.error(errorMessage(err));
+        router.push("/buy-credits");
+      } else {
+        toast.error(errorMessage(err));
+      }
+      await getUserCredits();
     } finally {
       setLoading(false);
+      setProgress(null);
     }
   };
 
-  // Rewrite the current idea into a detailed prompt the user can edit before generating
+  // Rewrites the current idea into a detailed prompt the user can edit before generating
   const enhancePrompt = async () => {
+    if (!isSignedIn) {
+      toast.error("Sign in to enhance prompts");
+      return;
+    }
     if (!imagePrompt.trim()) {
       toast.error("Type an idea first");
       return;
@@ -87,23 +111,13 @@ export const ImageGenerationProvider = ({
 
     setEnhancing(true);
     try {
-      const res = await fetch("/api/prompt/optimize", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ prompt: imagePrompt }),
+      const { prompt } = await api<{ prompt: string }>("/api/prompts/enhance", {
+        body: { idea: imagePrompt },
+        token: await getToken(),
       });
-      if (res.status === 401) {
-        toast.error("Please sign in to enhance prompts");
-        return;
-      }
-      const body = await res.json();
-      if (!body.success) {
-        toast.error(body.error || "Could not enhance the prompt");
-        return;
-      }
-      setImagePrompt(body.data.prompt);
-    } catch {
-      toast.error("Could not enhance the prompt. Please try again.");
+      setImagePrompt(prompt);
+    } catch (err) {
+      toast.error(errorMessage(err));
     } finally {
       setEnhancing(false);
     }
@@ -115,6 +129,7 @@ export const ImageGenerationProvider = ({
         imagePrompt,
         setImagePrompt,
         loading,
+        progress,
         generateImage,
         enhancing,
         enhancePrompt,
@@ -126,5 +141,3 @@ export const ImageGenerationProvider = ({
     </ImageGenerationContext.Provider>
   );
 };
-
-// Hook moved to hooks/useImageGeneration.ts
