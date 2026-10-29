@@ -10,7 +10,7 @@ The hard part is the money. The platform pays the model provider for every call,
 ![Stripe](https://img.shields.io/badge/Stripe-Checkout-635BFF?logo=stripe)
 ![Next.js](https://img.shields.io/badge/Next.js-15-black?logo=next.js)
 
-> `main` is a Next.js frontend with a Spring Boot backend. The original full-stack Next.js (TypeScript) version is on the [`nextjs-fullstack`](https://github.com/KeitouYa/ai-image-chat-saas/tree/nextjs-fullstack) branch.
+> This repository is a Next.js frontend with a Spring Boot backend. The original full-stack Next.js (TypeScript) version is in [sketchfast-nextjs](https://github.com/KeitouYa/sketchfast-nextjs).
 
 ## Architecture
 
