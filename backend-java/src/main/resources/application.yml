@@ -19,6 +19,10 @@ app:
       - { id: credits_10, credits: 10, price-cents: 100, currency: usd }
       - { id: credits_30, credits: 30, price-cents: 250, currency: usd }
       - { id: credits_60, credits: 60, price-cents: 400, currency: usd }
+  payments:
+    stripe-secret-key: ${STRIPE_SECRET_KEY:}
+    stripe-webhook-secret: ${STRIPE_WEBHOOK_SECRET:}
+    frontend-url: ${FRONTEND_URL:http://localhost:3000}
   clerk:
     # e.g. https://your-app.clerk.accounts.dev (the "iss" claim of Clerk session tokens)
     issuer: ${CLERK_ISSUER:}
