@@ -21,7 +21,7 @@ const geistMono = Geist_Mono({
 export const metadata: Metadata = {
   title: "AI Image Generator",
   description:
-    "Generate images with AI for free. Buy credits to generate more images.",
+    "Describe a picture, pick a style and generate it in seconds. New accounts get 20 free credits.",
 };
 
 export default function RootLayout({

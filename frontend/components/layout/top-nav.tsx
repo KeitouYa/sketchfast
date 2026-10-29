@@ -10,7 +10,7 @@ import {
   UserButton,
 } from "@clerk/nextjs";
 
-import { LogIn, LaptopMinimal, Icon, LucideIcon, Bot } from "lucide-react";
+import { LogIn, LaptopMinimal, LucideIcon } from "lucide-react";
 import { Toaster } from "react-hot-toast";
 import ModeToggle from "./mode-toggle";
 import Credits from "./credits";
@@ -21,7 +21,6 @@ interface IconWithTextProps {
   text: string;
 }
 
-//Update the IconWithText component to include cursor-pointer
 const IconWithText: React.FC<IconWithTextProps> = ({
   href,
   icon: Icon,
@@ -54,7 +53,6 @@ export default function TopNav() {
           </span>
         </div>
 
-        {/* //if login in, use IconWithText */}
         <SignedIn>
           <IconWithText
             href="/dashboard"
@@ -62,8 +60,6 @@ export default function TopNav() {
             text="Dashboard"
           />
         </SignedIn>
-
-        <IconWithText href="/chat" icon={Bot} text="Chat" />
 
         <SignedIn>
           <div className="flex flex-col items-center cursor-pointer">
