@@ -1,0 +1,6 @@
+# Test-only overrides, loaded on top of src/main/resources/application.yml
+app:
+  images:
+    # Tests call pollRunning() and sweepExpired() themselves so results are deterministic
+    scheduler-enabled: false
+    replicate-webhook-secret: whsec_dGVzdC1yZXBsaWNhdGUtc2VjcmV0

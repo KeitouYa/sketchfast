@@ -10,8 +10,34 @@ spring:
   data:
     mongodb:
       auto-index-creation: true
+  http:
+    clients:
+      # Applies to every RestClient built from Spring's builder (Replicate, LLM providers)
+      connect-timeout: 5s
+      read-timeout: 30s
+  threads:
+    virtual:
+      # Requests mostly wait on Replicate, Cloudinary and Stripe; virtual threads make that waiting cheap
+      enabled: true
 
 app:
+  images:
+    model: black-forest-labs/flux-schnell
+    replicate-api-token: ${REPLICATE_API_TOKEN:}
+    # From GET https://api.replicate.com/v1/webhooks/default/secret
+    replicate-webhook-secret: ${REPLICATE_WEBHOOK_SECRET:}
+    # Public URL of this backend, for Replicate's webhook. Blank (local dev): no webhook, polling only
+    public-base-url: ${PUBLIC_BASE_URL:}
+    # ADR-001: an image not finished by then is failed and refunded by the sweep
+    timeout: PT5M
+    poll-after: PT15S
+    poll-interval: PT10S
+    scheduler-enabled: true
+    cloudinary:
+      cloud-name: ${CLOUDINARY_CLOUD_NAME:}
+      api-key: ${CLOUDINARY_API_KEY:}
+      api-secret: ${CLOUDINARY_API_SECRET:}
+      folder: ai_images
   credits:
     signup-bonus: 20
     image-cost: 1
@@ -28,6 +54,25 @@ app:
     issuer: ${CLERK_ISSUER:}
     # Origins allowed in the "azp" claim
     authorized-parties: ${CLERK_AUTHORIZED_PARTIES:http://localhost:3000}
+
+resilience4j:
+  retry:
+    instances:
+      # Network errors, 5xx and 429 are worth retrying; other 4xx (bad token, bad input) are not
+      replicate:
+        max-attempts: 3
+        wait-duration: 500ms
+        enable-exponential-backoff: true
+        exponential-backoff-multiplier: 2
+        retry-exceptions:
+          - org.springframework.web.client.ResourceAccessException
+          - org.springframework.web.client.HttpServerErrorException
+          - org.springframework.web.client.HttpClientErrorException$TooManyRequests
+      cloudinary:
+        max-attempts: 3
+        wait-duration: 1s
+        enable-exponential-backoff: true
+        exponential-backoff-multiplier: 2
 
 management:
   endpoints:
