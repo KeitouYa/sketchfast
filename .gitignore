@@ -1,8 +1,8 @@
 # See https://help.github.com/articles/ignoring-files/ for more about ignoring files.
 
 # dependencies
-/node_modules
-/.pnp
+node_modules/
+.pnp
 .pnp.*
 .yarn/*
 !.yarn/patches
@@ -11,14 +11,23 @@
 !.yarn/versions
 
 # testing
-/coverage
+coverage/
 
 # next.js
-/.next/
-/out/
+.next/
+frontend/out/
 
 # production
-/build
+frontend/build/
+
+# java (backend-java)
+target/
+.idea/
+*.iml
+.settings/
+.classpath
+.project
+.factorypath
 
 # misc
 .DS_Store
@@ -46,8 +55,7 @@ metrics*.log
 next-env.d.ts
 
 # clerk configuration (can include secrets)
-/.clerk/
-.clerk/.tmp/
+.clerk/
 
 .vercel
 
@@ -67,3 +75,7 @@ metrics-report.json
 /test-demo
 # Resume files
 .github/Resume*
+
+# Private planning docs (not for public repo)
+/document
+/docs/开发文档框架.md

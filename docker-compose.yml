@@ -1,0 +1,43 @@
+# Local MongoDB + Redis for development. Usage:
+#   docker compose up -d
+# then point .env.development.local at them (see .env.example).
+
+services:
+  mongo:
+    image: mongo:7
+    # Single-node replica set: PayPal crediting uses a MongoDB transaction,
+    # which needs a replica set.
+    command: ["--replSet", "rs0", "--bind_ip_all"]
+    ports:
+      - "27017:27017"
+    volumes:
+      - mongo-data:/data/db
+    healthcheck:
+      # Initiates the replica set on first start, then just reports its state
+      test: >
+        mongosh --quiet --eval "try { rs.status().ok } catch (e) { rs.initiate({_id: 'rs0', members: [{_id: 0, host: 'localhost:27017'}]}).ok }"
+      interval: 5s
+      timeout: 10s
+      retries: 20
+
+  redis:
+    image: redis:7
+    # Host port 6380 because 6379 is often taken. The Java backend connects here directly;
+    # the Next.js TypeScript backend goes through serverless-redis-http below.
+    ports:
+      - "6380:6379"
+
+  # Speaks the Upstash REST protocol, so @upstash/redis and @upstash/ratelimit work unchanged
+  redis-http:
+    image: hiett/serverless-redis-http:latest
+    environment:
+      SRH_MODE: env
+      SRH_TOKEN: local_dev_token
+      SRH_CONNECTION_STRING: redis://redis:6379
+    ports:
+      - "8079:80"
+    depends_on:
+      - redis
+
+volumes:
+  mongo-data:

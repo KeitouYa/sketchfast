@@ -1,0 +1,117 @@
+spring:
+  application:
+    name: aiimage
+  config:
+    # Local secrets live in backend-java/.env (gitignored); see .env.example
+    import: optional:file:.env[.properties]
+  mongodb:
+    # Needs a replica set for transactions; docker-compose.yml at the repo root starts one
+    uri: ${MONGODB_URI:mongodb://localhost:27017/aiimage?replicaSet=rs0&directConnection=true}
+  data:
+    mongodb:
+      auto-index-creation: true
+    redis:
+      # Local: docker compose's Redis on 6380. Production: Upstash's rediss:// URL
+      url: ${REDIS_URL:redis://localhost:6380}
+  cache:
+    type: redis
+    cache-names: enhance, translations
+    redis:
+      # Same as the TypeScript version; also saves the Gemini free tier's 20 requests a day
+      time-to-live: 7d
+  ai:
+    chat:
+      client:
+        # Two chat models are configured, so ChatClients are built per provider in AiConfig
+        enabled: false
+    google:
+      genai:
+        api-key: ${GEMINI_API_KEY:not-set}
+        chat:
+          options:
+            model: gemini-2.5-flash
+    openai:
+      api-key: ${OPENAI_API_KEY:not-set}
+      chat:
+        options:
+          model: gpt-4o-mini
+  http:
+    clients:
+      # Applies to every RestClient built from Spring's builder (Replicate, LLM providers)
+      connect-timeout: 5s
+      read-timeout: 30s
+  threads:
+    virtual:
+      # Requests mostly wait on Replicate, Cloudinary and Stripe; virtual threads make that waiting cheap
+      enabled: true
+
+app:
+  images:
+    model: black-forest-labs/flux-schnell
+    replicate-api-token: ${REPLICATE_API_TOKEN:}
+    # From GET https://api.replicate.com/v1/webhooks/default/secret
+    replicate-webhook-secret: ${REPLICATE_WEBHOOK_SECRET:}
+    # Public URL of this backend, for Replicate's webhook. Blank (local dev): no webhook, polling only
+    public-base-url: ${PUBLIC_BASE_URL:}
+    # ADR-001: an image not finished by then is failed and refunded by the sweep
+    timeout: PT5M
+    poll-after: PT15S
+    poll-interval: PT10S
+    scheduler-enabled: true
+    cloudinary:
+      cloud-name: ${CLOUDINARY_CLOUD_NAME:}
+      api-key: ${CLOUDINARY_API_KEY:}
+      api-secret: ${CLOUDINARY_API_SECRET:}
+      folder: ai_images
+  credits:
+    signup-bonus: 20
+    image-cost: 1
+    packages:
+      - { id: credits_10, credits: 10, price-cents: 100, currency: usd }
+      - { id: credits_30, credits: 30, price-cents: 250, currency: usd }
+      - { id: credits_60, credits: 60, price-cents: 400, currency: usd }
+  payments:
+    stripe-secret-key: ${STRIPE_SECRET_KEY:}
+    stripe-webhook-secret: ${STRIPE_WEBHOOK_SECRET:}
+    frontend-url: ${FRONTEND_URL:http://localhost:3000}
+  clerk:
+    # e.g. https://your-app.clerk.accounts.dev (the "iss" claim of Clerk session tokens)
+    issuer: ${CLERK_ISSUER:}
+    # Origins allowed in the "azp" claim
+    authorized-parties: ${CLERK_AUTHORIZED_PARTIES:http://localhost:3000}
+
+resilience4j:
+  retry:
+    instances:
+      # Network errors, 5xx and 429 are worth retrying; other 4xx (bad token, bad input) are not
+      replicate:
+        max-attempts: 3
+        wait-duration: 500ms
+        enable-exponential-backoff: true
+        exponential-backoff-multiplier: 2
+        retry-exceptions:
+          - org.springframework.web.client.ResourceAccessException
+          - org.springframework.web.client.HttpServerErrorException
+          - org.springframework.web.client.HttpClientErrorException$TooManyRequests
+      cloudinary:
+        max-attempts: 3
+        wait-duration: 1s
+        enable-exponential-backoff: true
+        exponential-backoff-multiplier: 2
+      # No retry: a quota or outage error won't clear in seconds, so go straight to the backup model
+      llm:
+        max-attempts: 1
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health
+  health:
+    redis:
+      # Redis only caches LLM results; the app works without it, so it shouldn't mark the app DOWN
+      enabled: false
+
+logging:
+  pattern:
+    correlation: "[%X{requestId:-}] "
