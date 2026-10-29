@@ -85,7 +85,7 @@ public class ImageService {
 		String id = new ObjectId().toHexString();
 		int cost = creditProperties.imageCost();
 		Instant now = Instant.now();
-		int balance = tx.run(() -> {
+		int balance = tx.runForAccount(user.email(), () -> {
 			int after = credits.chargeInTransaction(user.email(), cost, REF_TYPE, id);
 			mongo.insert(new Image(id, user.email(), user.name(), prompt, style, Status.PENDING, null, cost, null, null,
 					now.plus(properties.timeout()), now, now));
@@ -134,7 +134,11 @@ public class ImageService {
 	 * @return whether this call failed (and refunded) the image
 	 */
 	public boolean fail(String imageId, String failureCode) {
-		return tx.run(() -> {
+		Image current = mongo.findOne(query(where("_id").is(imageId)), Image.class);
+		if (current == null || current.status().finished()) {
+			return false;
+		}
+		return tx.runForAccount(current.userEmail(), () -> {
 			Image failed = mongo.findAndModify(
 					query(where("_id").is(imageId).and("status").in(Status.PENDING, Status.SAVING)),
 					new Update().set("status", Status.FAILED).set("failureCode", failureCode).set("updatedAt", Instant.now()),

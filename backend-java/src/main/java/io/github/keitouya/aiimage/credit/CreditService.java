@@ -22,20 +22,18 @@ import org.springframework.transaction.support.TransactionSynchronizationManager
 /**
  * Credit balances and the ledger (ADR-001).
  *
- * <p>Methods named {@code *InTransaction} change the balance and must run inside {@link MongoTx#run}, so the
- * caller can put its own writes (an image record, a payment status) in the same transaction. Every balance
+ * <p>Methods named {@code *InTransaction} change the balance and must run inside {@link MongoTx#runForAccount}, so
+ * the caller can put its own writes (an image record, a payment status) in the same transaction. Every balance
  * change writes a ledger entry whose unique idempotency key stops the same event being applied twice.
  */
 @Service
 public class CreditService {
 
 	private final MongoTemplate mongo;
-	private final MongoTx tx;
 	private final CreditProperties properties;
 
-	CreditService(MongoTemplate mongo, MongoTx tx, CreditProperties properties) {
+	CreditService(MongoTemplate mongo, CreditProperties properties) {
 		this.mongo = mongo;
-		this.tx = tx;
 		this.properties = properties;
 	}
 
@@ -44,23 +42,31 @@ public class CreditService {
 	}
 
 	/**
-	 * Opens the account with the signup bonus on first use. Concurrent first requests race on the unique
-	 * userEmail index; the losers see a duplicate key and read the winner's account, so the bonus is given once.
+	 * Opens the account with the signup bonus on first use, without a transaction: the ledger entry is written
+	 * first, then the account is upserted. Both writes are single-document and repeatable (unique keys), so
+	 * concurrent first requests, or a crash between the two writes, still end with one account whose balance
+	 * equals its ledger. A transaction here aborted under a burst of first requests (MongoDB WriteConflict).
 	 */
 	public CreditAccount ensureAccount(String email) {
 		CreditAccount existing = findAccount(email);
 		if (existing != null) {
 			return existing;
 		}
+		int bonus = properties.signupBonus();
 		try {
-			tx.run(() -> {
-				int bonus = properties.signupBonus();
-				mongo.insert(CreditAccount.open(email, bonus));
-				mongo.insert(LedgerEntry.of(email, bonus, Type.SIGNUP_BONUS, "ACCOUNT", email, "signup:" + email, bonus));
-			});
+			mongo.insert(LedgerEntry.of(email, bonus, Type.SIGNUP_BONUS, "ACCOUNT", email, "signup:" + email, bonus));
+		}
+		catch (DuplicateKeyException alreadyGranted) {
+			// a concurrent first request wrote it
+		}
+		Instant now = Instant.now();
+		try {
+			mongo.upsert(query(where("userEmail").is(email)),
+					new Update().setOnInsert("balance", bonus).setOnInsert("createdAt", now).setOnInsert("updatedAt", now),
+					CreditAccount.class);
 		}
 		catch (DuplicateKeyException alreadyOpened) {
-			// another request opened it first
+			// two upserts raced on the unique index; the other one inserted
 		}
 		return findAccount(email);
 	}

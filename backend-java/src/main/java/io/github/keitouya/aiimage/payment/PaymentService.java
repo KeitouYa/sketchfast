@@ -121,7 +121,10 @@ public class PaymentService {
 					checkout.amountTotal(), checkout.currency(), order.amountCents(), order.currency());
 			return order;
 		}
-		return tx.run(() -> {
+		if (order.status() != Status.PENDING) {
+			return order;
+		}
+		return tx.runForAccount(order.userEmail(), () -> {
 			PaymentOrder paid = mongo.findAndModify(query(where("_id").is(order.id()).and("status").is(Status.PENDING)),
 					new Update().set("status", Status.PAID).set("paidAt", Instant.now()),
 					FindAndModifyOptions.options().returnNew(true), PaymentOrder.class);
