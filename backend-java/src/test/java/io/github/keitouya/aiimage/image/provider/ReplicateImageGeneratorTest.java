@@ -84,6 +84,16 @@ class ReplicateImageGeneratorTest {
 	}
 
 	@Test
+	void safetyFilterRejectionIsRecognised() {
+		Job filtered = ReplicateImageGenerator.toJob(new ReplicateImageGenerator.Prediction("p1", "failed", null,
+				"Model execution failed (User Input Error): AiError: NSFW content detected. Try running it again."));
+		Job broken = ReplicateImageGenerator.toJob(new ReplicateImageGenerator.Prediction("p1", "failed", null, "CUDA OOM"));
+
+		assertThat(filtered.contentFiltered()).isTrue();
+		assertThat(broken.contentFiltered()).isFalse();
+	}
+
+	@Test
 	void missingTokenIsProviderUnavailable() {
 		assertThatThrownBy(() -> generator("").submit("a cat", null)).isInstanceOfSatisfying(ApiException.class,
 				ex -> assertThat(ex.code()).isEqualTo(ErrorCode.PROVIDER_UNAVAILABLE));

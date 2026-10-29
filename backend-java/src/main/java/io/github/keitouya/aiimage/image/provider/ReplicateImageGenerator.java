@@ -3,6 +3,7 @@ package io.github.keitouya.aiimage.image.provider;
 import java.time.Instant;
 import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 
 import io.github.keitouya.aiimage.common.ApiException;
@@ -74,7 +75,9 @@ public class ReplicateImageGenerator implements ImageGenerator {
 		}
 		return switch (p.status() == null ? "" : p.status()) {
 			case "succeeded" -> new Job(p.id(), State.SUCCEEDED, firstUrl(p.output()), null);
-			case "failed", "canceled", "aborted" -> new Job(p.id(), State.FAILED, null, String.valueOf(p.error()));
+			// FLUX's safety checker reports rejections as "NSFW content detected", sometimes for harmless prompts
+			case "failed", "canceled", "aborted" -> new Job(p.id(), State.FAILED, null, String.valueOf(p.error()),
+					String.valueOf(p.error()).toLowerCase(Locale.ROOT).contains("nsfw"));
 			default -> new Job(p.id(), State.RUNNING, null, null);
 		};
 	}

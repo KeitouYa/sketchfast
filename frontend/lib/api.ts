@@ -72,6 +72,19 @@ const MESSAGES: Record<string, string> = {
   INTERNAL_ERROR: "Something went wrong on our side. Please try again.",
 };
 
+// Why an image ended FAILED (ImageView.failureCode). Every failed image has been refunded.
+const IMAGE_FAILURES: Record<string, string> = {
+  CONTENT_FILTERED:
+    "The model's safety filter flagged this description. It sometimes flags harmless ones, so try rewording it.",
+  TIMEOUT: "The image took too long to generate.",
+  UPLOAD_FAILED: "The image was generated but couldn't be saved.",
+};
+
+export function imageFailureMessage(failureCode: string | null): string {
+  const reason = (failureCode && IMAGE_FAILURES[failureCode]) || "The image couldn't be generated.";
+  return `${reason} Your credit has been refunded.`;
+}
+
 export function errorMessage(err: unknown): string {
   if (err instanceof ApiError) {
     if (err.code === "VALIDATION_FAILED" && err.message) return err.message;

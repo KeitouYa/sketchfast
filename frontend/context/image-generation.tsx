@@ -5,7 +5,7 @@ import { useAuth } from "@clerk/nextjs";
 import { useRouter } from "next/navigation";
 import { toast } from "react-hot-toast";
 import { useCredits } from "@/hooks/useCredits";
-import { api, ApiError, errorMessage } from "@/lib/api";
+import { api, ApiError, errorMessage, imageFailureMessage } from "@/lib/api";
 import type { ImageView, SubmittedImage } from "@/lib/types";
 
 // Exported for hooks/useImageGeneration.ts
@@ -80,7 +80,7 @@ export const ImageGenerationProvider = ({ children }: { children: React.ReactNod
         toast.success("Your image is ready");
         router.push(`/dashboard/image/${image.id}`);
       } else if (image.status === "FAILED") {
-        toast.error("The image couldn't be generated. Your credit has been refunded.");
+        toast.error(imageFailureMessage(image.failureCode), { duration: 6000 });
       } else {
         toast("Still working on it. It will appear in your dashboard when it's done.");
       }

@@ -3,6 +3,7 @@ package io.github.keitouya.aiimage.image;
 import static org.springframework.data.mongodb.core.query.Criteria.where;
 import static org.springframework.data.mongodb.core.query.Query.query;
 
+import java.time.Duration;
 import java.time.Instant;
 import java.util.List;
 import java.util.Optional;
@@ -25,6 +26,7 @@ import org.slf4j.LoggerFactory;
 import org.springframework.data.domain.Sort;
 import org.springframework.data.mongodb.core.FindAndModifyOptions;
 import org.springframework.data.mongodb.core.MongoTemplate;
+import org.springframework.data.mongodb.core.query.Criteria;
 import org.springframework.data.mongodb.core.query.Query;
 import org.springframework.data.mongodb.core.query.Update;
 import org.springframework.stereotype.Service;
@@ -47,6 +49,9 @@ public class ImageService {
 	private static final Logger log = LoggerFactory.getLogger(ImageService.class);
 
 	static final String REF_TYPE = "IMAGE";
+
+	/** How often an owner's status polls may ask the provider about one image. */
+	static final Duration OWNER_CHECK_INTERVAL = Duration.ofSeconds(2);
 
 	private final MongoTemplate mongo;
 	private final MongoTx tx;
@@ -88,7 +93,7 @@ public class ImageService {
 		int balance = tx.runForAccount(user.email(), () -> {
 			int after = credits.chargeInTransaction(user.email(), cost, REF_TYPE, id);
 			mongo.insert(new Image(id, user.email(), user.name(), prompt, style, Status.PENDING, null, cost, null, null,
-					now.plus(properties.timeout()), now, now));
+					now.plus(properties.timeout()), now, now, null));
 			return after;
 		});
 
@@ -121,7 +126,7 @@ public class ImageService {
 			}
 			case FAILED -> {
 				log.info("Generation failed for image {}: {}", image.id(), job.error());
-				fail(image.id(), "PROVIDER_FAILED");
+				fail(image.id(), job.contentFiltered() ? "CONTENT_FILTERED" : "PROVIDER_FAILED");
 			}
 			case SUCCEEDED -> save(image.id(), job.outputUrl());
 		}
@@ -183,7 +188,10 @@ public class ImageService {
 		return swept;
 	}
 
-	/** The owner sees any state; everyone else only finished images, which is what a share link shows. */
+	/**
+	 * The owner sees any state; everyone else only finished images, which is what a share link shows.
+	 * An owner's read of a pending image is read-through: see {@link #checkIfDue}.
+	 */
 	public Optional<Image> findVisible(String imageId, Optional<CurrentUser> viewer) {
 		if (!ObjectId.isValid(imageId)) {
 			return Optional.empty();
@@ -193,7 +201,40 @@ public class ImageService {
 			return Optional.empty();
 		}
 		boolean owner = viewer.map(u -> u.email().equals(image.userEmail())).orElse(false);
-		return owner || image.status() == Status.SUCCEEDED ? Optional.of(image) : Optional.empty();
+		if (owner) {
+			return Optional.of(checkIfDue(image));
+		}
+		return image.status() == Status.SUCCEEDED ? Optional.of(image) : Optional.empty();
+	}
+
+	/**
+	 * While the owner's page polls a pending image, asks the provider directly instead of waiting for the webhook
+	 * or the scheduled poll, so a finished image shows within one client poll (locally there is no webhook at all).
+	 * At most one check per image every {@link #OWNER_CHECK_INTERVAL}, claimed with a conditional update on
+	 * checkedAt so several tabs or instances don't multiply provider calls. The result goes through
+	 * {@link #onJobUpdate}, the same conditional updates the webhook uses.
+	 */
+	Image checkIfDue(Image image) {
+		if (image.status() != Status.PENDING || image.providerJobId() == null) {
+			return image;
+		}
+		Instant now = Instant.now();
+		Criteria due = new Criteria().orOperator(where("checkedAt").exists(false), where("checkedAt").is(null),
+				where("checkedAt").lt(now.minus(OWNER_CHECK_INTERVAL)));
+		Image claimed = mongo.findAndModify(
+				query(where("_id").is(image.id()).and("status").is(Status.PENDING)).addCriteria(due),
+				Update.update("checkedAt", now), Image.class);
+		if (claimed == null) {
+			return image;
+		}
+		try {
+			onJobUpdate(generator.fetch(image.providerJobId()));
+		}
+		catch (RuntimeException ex) {
+			log.warn("Status check for image {} failed: {}", image.id(), ex.toString());
+			return image;
+		}
+		return mongo.findOne(query(where("_id").is(image.id())), Image.class);
 	}
 
 	public List<Image> gallery(String email, int page, int size) {

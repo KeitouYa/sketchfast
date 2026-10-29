@@ -3,7 +3,7 @@ import Image from "next/image";
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import ImageEditButtons from "@/components/image/image-edit-buttons";
-import { ApiError } from "@/lib/api";
+import { ApiError, imageFailureMessage } from "@/lib/api";
 import { serverApi } from "@/lib/server-api";
 import type { ImageView } from "@/lib/types";
 
@@ -30,9 +30,7 @@ export default async function ImagePage({ params }: ImagePageProps) {
       <div className="max-w-xl mx-auto py-16 px-4 text-center space-y-3">
         <h1 className="text-2xl font-semibold">{failed ? "This image couldn't be generated" : "Still generating"}</h1>
         <p className="text-muted-foreground">
-          {failed
-            ? "Your credit has been refunded. Try again, perhaps with a different description."
-            : "Refresh in a few seconds to see it."}
+          {failed ? imageFailureMessage(image.failureCode) : "Refresh in a few seconds to see it."}
         </p>
         <p className="text-sm text-muted-foreground">&ldquo;{image.prompt}&rdquo;</p>
         <Link href="/" className="underline">

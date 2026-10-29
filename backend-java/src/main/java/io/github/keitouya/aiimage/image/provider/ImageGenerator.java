@@ -19,7 +19,15 @@ public interface ImageGenerator {
 	 */
 	Job parseWebhook(String deliveryId, String timestamp, String signature, String body);
 
-	record Job(String id, State state, String outputUrl, String error) {
+	/**
+	 * @param contentFiltered the provider's safety filter rejected the prompt or the result; such false positives
+	 * happen, so the user is told to reword rather than shown a generic failure
+	 */
+	record Job(String id, State state, String outputUrl, String error, boolean contentFiltered) {
+
+		public Job(String id, State state, String outputUrl, String error) {
+			this(id, state, outputUrl, error, false);
+		}
 	}
 
 	enum State {

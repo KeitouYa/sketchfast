@@ -216,7 +216,7 @@ class ImageFlowTest {
 		tx.run(() -> {
 			credits.chargeInTransaction(email, 1, ImageService.REF_TYPE, id);
 			mongo.insert(new Image(id, email, "Ivy", "a red bicycle", "none", Status.PENDING, null, 1, null, null,
-					now.minusSeconds(1), now, now));
+					now.minusSeconds(1), now, now, null));
 		});
 
 		images.sweepExpired();
@@ -289,6 +289,42 @@ class ImageFlowTest {
 			.andExpect(jsonPath("$.status").value("SUCCEEDED"))
 			.andExpect(jsonPath("$.userName").value("Ivy"));
 		mvc.perform(get("/api/images/not-an-id")).andExpect(status().isNotFound());
+	}
+
+	@Test
+	void ownersPollPicksUpAFinishedJobWithoutWaitingForTheWebhook() throws Exception {
+		String id = submit("a red bicycle", "none");
+		generator.finish(image(id).providerJobId(), ImageGenerator.State.SUCCEEDED);
+
+		mvc.perform(get("/api/images/" + id).with(user))
+			.andExpect(status().isOk())
+			.andExpect(jsonPath("$.status").value("SUCCEEDED"))
+			.andExpect(jsonPath("$.url").value("https://cdn.test/" + id + ".webp"));
+	}
+
+	@Test
+	void ownerChecksAreThrottledAndOthersNeverTriggerThem() throws Exception {
+		String id = submit("a red bicycle", "none");
+		String job = image(id).providerJobId();
+		int before = generator.fetches(job);
+
+		mvc.perform(get("/api/images/" + id)).andExpect(status().isNotFound());
+		mvc.perform(get("/api/images/" + id).with(user)).andExpect(jsonPath("$.status").value("PENDING"));
+		mvc.perform(get("/api/images/" + id).with(user)).andExpect(jsonPath("$.status").value("PENDING"));
+
+		// The anonymous read checked nothing; of the two owner reads within 2 seconds only one asked the provider
+		assertThat(generator.fetches(job) - before).isEqualTo(1);
+	}
+
+	@Test
+	void safetyFilterRejectionIsReportedAsContentFilteredAndRefunded() throws Exception {
+		String id = submit("a single rose, close-up", "comic");
+		generator.filter(image(id).providerJobId());
+
+		mvc.perform(get("/api/images/" + id).with(user))
+			.andExpect(jsonPath("$.status").value("FAILED"))
+			.andExpect(jsonPath("$.failureCode").value("CONTENT_FILTERED"));
+		assertThat(credits.balance(email)).isEqualTo(20);
 	}
 
 	@Test
@@ -404,6 +440,7 @@ class ImageFlowTest {
 
 		@Override
 		public Job fetch(String jobId) {
+			fetchCounts.computeIfAbsent(jobId, k -> new AtomicInteger()).incrementAndGet();
 			return jobs.get(jobId);
 		}
 
@@ -416,6 +453,17 @@ class ImageFlowTest {
 			jobs.put(jobId, new Job(jobId, state, state == State.SUCCEEDED ? "https://replicate.delivery/" + jobId : null,
 					state == State.FAILED ? "model error" : null));
 		}
+
+		void filter(String jobId) {
+			jobs.put(jobId, new Job(jobId, State.FAILED, null, "NSFW content detected", true));
+		}
+
+		int fetches(String jobId) {
+			AtomicInteger count = fetchCounts.get(jobId);
+			return count == null ? 0 : count.get();
+		}
+
+		private final Map<String, AtomicInteger> fetchCounts = new ConcurrentHashMap<>();
 	}
 
 	static class FakeStorage implements ImageStorage {

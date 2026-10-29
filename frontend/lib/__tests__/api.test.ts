@@ -1,4 +1,4 @@
-import { api, ApiError, errorMessage } from "@/lib/api";
+import { api, ApiError, errorMessage, imageFailureMessage } from "@/lib/api";
 
 const realFetch = global.fetch;
 
@@ -52,6 +52,11 @@ describe("errorMessage", () => {
     expect(errorMessage(new ApiError(400, "VALIDATION_FAILED", "Describe the image in 3 to 600 characters."))).toBe(
       "Describe the image in 3 to 600 characters."
     );
+  });
+
+  it("says why an image failed and that the credit came back", () => {
+    expect(imageFailureMessage("CONTENT_FILTERED")).toMatch(/safety filter.*rewording.*refunded/);
+    expect(imageFailureMessage(null)).toBe("The image couldn't be generated. Your credit has been refunded.");
   });
 
   it("explains network failures", () => {
