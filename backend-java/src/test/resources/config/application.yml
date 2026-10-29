@@ -1,4 +1,8 @@
 # Test-only overrides, loaded on top of src/main/resources/application.yml
+spring:
+  cache:
+    # No Redis in tests; caching is plain Spring behaviour, the LLM calls are what tests check
+    type: none
 app:
   images:
     # Tests call pollRunning() and sweepExpired() themselves so results are deterministic

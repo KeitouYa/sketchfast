@@ -22,7 +22,10 @@ services:
 
   redis:
     image: redis:7
-    # No host port: 6379 is often taken; the app reaches Redis through serverless-redis-http
+    # Host port 6380 because 6379 is often taken. The Java backend connects here directly;
+    # the Next.js TypeScript backend goes through serverless-redis-http below.
+    ports:
+      - "6380:6379"
 
   # Speaks the Upstash REST protocol, so @upstash/redis and @upstash/ratelimit work unchanged
   redis-http:
