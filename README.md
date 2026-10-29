@@ -1,255 +1,126 @@
-# AI Image Generator & Chat Platform
+# Sketchfast — AI Image Generation SaaS
 
-A full-stack SaaS application for AI image generation and chat, with a pay-per-use credit system, built on Next.js 15 with a layered backend.
+Pay-per-use AI image generation. Users describe a picture in any language, pick one of eight comic styles, and get the image in about ten seconds. Each image costs one credit; new users get 20, and more are bought through Stripe Checkout.
 
-![Next.js](https://img.shields.io/badge/Next.js-15.5.7-black?logo=next.js)
-![TypeScript](https://img.shields.io/badge/TypeScript-5.0-blue?logo=typescript)
-![Mongoose](https://img.shields.io/badge/Mongoose-8-green?logo=mongodb)
-![React](https://img.shields.io/badge/React-19-61DAFB?logo=react)
+The hard part is the money. The platform pays the model provider for every call, calls fail or time out, and payment callbacks arrive more than once. The backend makes sure a user is never charged twice, never left without a refund, and never credited twice for one payment.
 
-**Live Demo**: [https://ai-image-chat-saas.vercel.app/](https://ai-image-chat-saas.vercel.app/)
+![Java](https://img.shields.io/badge/Java-21-orange?logo=openjdk)
+![Spring Boot](https://img.shields.io/badge/Spring%20Boot-4.1-6DB33F?logo=springboot)
+![MongoDB](https://img.shields.io/badge/MongoDB-7-47A248?logo=mongodb)
+![Stripe](https://img.shields.io/badge/Stripe-Checkout-635BFF?logo=stripe)
+![Next.js](https://img.shields.io/badge/Next.js-15-black?logo=next.js)
 
-## Technical Highlights
-
-### Architecture & Design Patterns
-
-- **Layered Backend**: `Route / Server Action → Service → Repository → Model`. Chat goes through an API route and a controller that validates input; image generation and credits are Server Actions.
-- **Factory Pattern**: AI providers (Gemini, OpenAI) sit behind one interface and are picked at runtime
-- **Atomic Operations**: credits are deducted with a single conditional MongoDB update (`credits: { $gte: cost }`), so concurrent requests can't overspend
-- **Request Tracing**: chat requests carry a `requestId` (nanoid) from the route through controller, service and repository logs
-
-### Performance & Reliability
-
-- **Multi-Provider Failover**: Gemini → OpenAI fallback, each call with a 30s timeout
-- **Refund on Failure**: if image generation fails after the credit was taken, or every chat provider fails, the credit is refunded
-- **Redis Caching**: chat replies are cached for 24 hours in Upstash Redis
-- **Timeouts**: 30s per AI chat call, 120s for image generation; a prediction that times out is cancelled
-- **Rate Limiting**: per-user daily cap on image generation (20/day, Upstash fixed window)
-
-### Security
-
-- **Server-side Payment Verification**: PayPal orders are priced and captured on the server (Orders v2 API); the browser only picks a package. A unique order id plus a `created → completed` status guard, applied in one MongoDB transaction with the credit update, means an order is credited exactly once
-- **Clerk Authentication**: pages and API routes are protected in middleware
-- **Role-Based Access**: a role hierarchy (ADMIN > SUBSCRIBER > USER) is checked inside admin API routes; admin features are API-only
-- **Input Validation**: Zod schemas for chat messages and image prompts
-
-## Tech Stack
-
-| Category | Technologies |
-|----------|-------------|
-| Frontend | Next.js 15 (App Router), React 19, TypeScript 5 |
-| Styling | Tailwind CSS 4, Radix UI, shadcn/ui |
-| Backend | Next.js API Routes and Server Actions (Node.js) |
-| Database | MongoDB (Atlas), Mongoose 8 |
-| Caching / Rate Limiting | Upstash Redis |
-| Auth | Clerk |
-| AI Services | Google Gemini, OpenAI (fallback), Replicate (FLUX Schnell) |
-| Storage | Cloudinary |
-| Payment | PayPal (Orders v2 REST API) |
-| Testing | Jest |
+> `main` is a Next.js frontend with a Spring Boot backend. The original full-stack Next.js (TypeScript) version is on the [`nextjs-fullstack`](https://github.com/KeitouYa/ai-image-chat-saas/tree/nextjs-fullstack) branch.
 
 ## Architecture
 
-```
-Client (React)
-  │
-  ├─ fetch ─────────────► API Routes /api/chat, /api/paypal/* ─► controllers (Zod)
-  │                                                     │
-  └─ Server Actions ────► image.service / payment.service
-     Server Components                                  │
-                                                        ▼
-                                  Service layer: credits, rate limit,
-                                  provider fallback, refunds, caching
-                                                        │
-              ┌─────────────────────────────────────────┼──────────────────────┐
-              ▼                                         ▼                      ▼
-   Repositories → MongoDB                      Upstash Redis          Gemini · OpenAI ·
-   (users, credits, images, costs)             (cache, rate limit)    Replicate · Cloudinary
-```
-
-## Key Implementation Details
-
-### AI Provider Failover
-
-```typescript
-// src/services/chat.service.ts (simplified)
-for (const provider of providers) {            // e.g. ["gemini", "openai"]
-  try {
-    const ai = await getAIProvider(provider);
-    const reply = await withTimeout(ai.chat(message), TIMEOUTS.AI_CHAT, `AI provider ${provider} timeout`);
-    return { reply, providerUsed: provider, fallbackUsed: provider !== primary };
-  } catch (err) {
-    if (provider === providers[providers.length - 1]) {
-      throw new ProviderError("All AI providers failed");
-    }
-  }
-}
+```mermaid
+flowchart LR
+  B[Browser] -->|pages| N[Next.js frontend]
+  N -->|"/api/** (rewrite)"| S[Spring Boot backend]
+  B -.->|sign in| C[Clerk]
+  S -->|verify JWT via JWKS| C
+  S --> M[("MongoDB replica set<br/>accounts · ledger · images · orders")]
+  S --> R[("Redis<br/>prompt cache")]
+  S -->|create prediction| P[Replicate · FLUX]
+  P -.->|signed webhook| S
+  S -->|upload from URL, WebP| CL[Cloudinary]
+  S -->|rewrite and translate| L[Gemini, OpenAI fallback]
+  S -->|Checkout session| ST[Stripe]
+  ST -.->|signed webhook| S
 ```
 
-### Atomic Credit Deduction and Refund
+The frontend only talks to the REST API, so the backend can be swapped. The backend is one Spring Boot module, packaged by feature (`credit`, `payment`, `image`, `prompt`, `security`, `common`). Errors are RFC 9457 problem details with a stable `code` and the `requestId`.
 
-```typescript
-// src/repositories/credits.repository.ts
-// Only matches when the balance covers the cost, so two concurrent requests can't both spend the last credit
-const result = await Credit.findOneAndUpdate(
-  { userEmail, credits: { $gte: cost } },
-  { $inc: { credits: -cost } },
-  { new: true }
-).lean();
+## How the money stays correct
 
-// src/services/image.service.ts
-// If anything after the deduction fails (Replicate, download, upload, save), the credit is given back
-if (charged) {
-  await creditRepository.refundCredits(userEmail, IMAGE_GENERATION_CREDIT_COST, requestId);
-}
-```
+- **A ledger, not just a balance.** Every change writes a ledger entry with a unique key (`signup:{email}`, `image:{id}:charge`, `image:{id}:refund`, `payment:{orderId}`) in the same MongoDB transaction as the balance update. A retried request hits the unique index and changes nothing, and the balance always equals the sum of the ledger.
+- **No overdraft.** Charging is one conditional update: it only succeeds while `balance >= cost`.
+- **Refund exactly once.** An image moves `PENDING → SAVING → SUCCEEDED | FAILED`, each step a conditional update. Failing the image and refunding happen in one transaction, so however many paths race to finish a job, it is refunded once.
+- **What counts as a failure.** Only an image that was never delivered: the model errored, nothing came back within 5 minutes, storage failed, or the model's safety filter rejected it (reported as `CONTENT_FILTERED`, so the user knows to reword). Running jobs are never canceled, because the provider bills them anyway.
+- **Three ways a result arrives.** Replicate's signed webhook (Standard Webhooks HMAC), a scheduled poller, and a timeout sweep. While the owner is waiting on the page, reading the image's status also checks Replicate, at most once every 2 seconds per image.
+- **Stripe credits an order once.** Prices come from the server's package list; the client sends only a package id. The webhook (signature checked, deduplicated by event id) and the return page both call the same fulfillment step, which checks the amount paid and moves the order `PENDING → PAID` with a conditional update.
+- **Same-account transactions are queued.** MongoDB transactions are optimistic: two that write the same document abort each other instead of waiting. Load testing showed 45% of requests failing at 20 concurrent requests per user. Balance changes now take a per-account lock (256 lock stripes) around a retried transaction, which brought failures and retries to zero. Across several servers, the retry on transient transaction errors is still the backstop.
 
-### Crediting a Purchase Exactly Once
+## Load test results
 
-```typescript
-// src/repositories/payment.repository.ts
-// The CREATED → COMPLETED guard makes a repeated capture of the same order a no-op
-await session.withTransaction(async () => {
-  const payment = await Payment.findOneAndUpdate(
-    { orderId, status: PaymentStatus.CREATED },
-    { $set: { status: PaymentStatus.COMPLETED, captureId, completedAt: new Date() } },
-    { new: true, session }
-  );
-  if (!payment) return; // already credited
+Local Docker (MongoDB 7, single-node replica set via Testcontainers), JDK 21, 16 cores. Replicate, Cloudinary and Stripe are simulated, with injected failures.
 
-  await Credit.findOneAndUpdate(
-    { userEmail: payment.userEmail },
-    { $inc: { credits: payment.credits, amount: Number(payment.amount) } },
-    { upsert: true, new: true, session }
-  );
-});
-```
+| Scenario | Result |
+|---|---|
+| 1,000 orders, each confirmed 5 times at once | Each order credited exactly once. p99 3.9 s, 0 transaction retries (the Node.js version: p99 77.6 s) |
+| 10,000 concurrent charges against a balance of 1,000 | Exactly 1,000 succeed; the balance ends at 0 |
+| 1,000 new users, 5 concurrent first requests each | Every user ends with exactly 20 free credits. p99 2.6 s |
+| 2,000 users generate at once, about 7% injected failures | 136 failures, each refunded exactly once; each success stored once. Submit p99 1.8 s |
+| 10,000 concurrent charges on one account | All correct but serialized: p99 66 s. This is the price of keeping the ledger and balance in one transaction; real users don't do this |
 
-### Image Generation with a Timeout
+## Tech stack
 
-```typescript
-// src/services/image.service.ts
-const prediction = await replicate.predictions.create({ model: "black-forest-labs/flux-schnell", input });
-try {
-  finished = await withTimeout(replicate.wait(prediction), TIMEOUTS.IMAGE_GENERATION, "Replicate prediction timeout");
-} catch (err) {
-  await replicate.predictions.cancel(prediction.id).catch(() => {}); // stop paying for a stuck prediction
-  throw err;
-}
-```
+| | |
+|---|---|
+| Backend | Java 21, Spring Boot 4.1 (Web MVC, Security OAuth2 resource server, Data MongoDB, Data Redis, Cache), Spring AI 2.0, Resilience4j |
+| Frontend | Next.js 15 (App Router), React 19, TypeScript, Tailwind CSS 4, shadcn/ui |
+| Data | MongoDB replica set (multi-document transactions), Redis |
+| Services | Clerk (auth), Stripe Checkout, Replicate (FLUX schnell), Cloudinary, Gemini and OpenAI |
+| Testing | JUnit 5, Testcontainers, MockRestServiceServer, Jest |
 
-### Request Tracing
+## Run locally
 
-```typescript
-// app/api/chat/route.ts
-const requestId = req.headers.get("x-request-id") || nanoid();
-logger.info("➡️ POST /api/chat", { requestId });
-// passed on to the controller, service and repository, so every log line of the request carries it
-```
-
-## Project Structure
-
-```
-├── app/                    # Next.js App Router
-│   ├── api/
-│   │   ├── chat/           # AI chat endpoint
-│   │   ├── paypal/         # Server-side PayPal order creation and capture
-│   │   └── admin/          # Admin-only stats and user list
-│   ├── chat/               # Chat page
-│   ├── dashboard/          # The user's images
-│   ├── image/[_id]/        # Public share page
-│   └── buy-credits/        # Credit purchase (PayPal)
-│
-├── src/
-│   ├── controllers/        # Input validation and response shape (chat)
-│   ├── services/           # Business logic; image and payment services are Server Actions
-│   ├── repositories/       # Data access, atomic credit updates
-│   ├── models/             # Mongoose schemas
-│   ├── providers/          # AI providers (Gemini, OpenAI) and the MongoDB connection
-│   ├── middlewares/        # Rate limiting, RBAC
-│   ├── schemas/            # Zod schemas
-│   ├── lib/                # Logger, cache, errors, timeouts
-│   └── __tests__/          # Jest tests
-│
-├── context/                # React contexts (credits, image generation, PayPal)
-├── hooks/                  # React hooks
-└── components/             # UI, layout, form and image components
-```
-
-## Getting Started
-
-### Prerequisites
-
-- Node.js 18+
-- A MongoDB database (e.g. MongoDB Atlas) and an Upstash Redis database
-- API keys for: Clerk, Google Gemini, OpenAI, Replicate, Cloudinary
-- A PayPal client id, for buying credits
-
-### Installation
+You need JDK 21, Node 20+ and Docker.
 
 ```bash
-git clone https://github.com/KeitouYa/ai-image-chat-saas.git
-cd ai-image-chat-saas/frontend
+docker compose up -d                  # MongoDB replica set on 27017, Redis on 6380
+
+cd backend-java
+cp .env.example .env                  # fill in the keys; each one is explained in the file
+./mvnw spring-boot:run                # http://localhost:8080
+
+cd ../frontend
+cp .env.example .env.local            # API_URL and the Clerk keys
 npm install --legacy-peer-deps
+npm run dev                           # http://localhost:3000
 ```
 
-### Environment Variables
+**Clerk:** the backend needs the user's email and name in the session token. In the Clerk dashboard, open Sessions → Customize session token and add:
 
-In `frontend/`, copy `.env.example` to `.env.local` and fill in:
-
-```env
-# Database
-DATABASE_URL=mongodb+srv://...
-
-# Authentication
-NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY=pk_...
-CLERK_SECRET_KEY=sk_...
-
-# AI Services
-GEMINI_API_KEY=...
-OPENAI_API_KEY=...
-REPLICATE_API_TOKEN=...
-
-# Storage
-CLOUDINARY_CLOUD_NAME=...
-CLOUDINARY_API_KEY=...
-CLOUDINARY_API_SECRET=...
-
-# Cache and rate limiting
-UPSTASH_REDIS_REST_URL=...
-UPSTASH_REDIS_REST_TOKEN=...
-
-# Payment
-NEXT_PUBLIC_PAYPAL_CLIENT_ID=...
-PAYPAL_CLIENT_SECRET=...
-PAYPAL_ENV=sandbox   # or live; must match the client id and secret
+```json
+{ "email": "{{user.primary_email_address}}", "name": "{{user.full_name}}" }
 ```
 
-### Run Development Server
+**Stripe:** put a test key (`sk_test_...`) in `STRIPE_SECRET_KEY` and pay with card `4242 4242 4242 4242`. Webhooks are optional locally, because the success page confirms the payment too. To test them, run `stripe listen --forward-to localhost:8080/api/webhooks/stripe` and put the printed secret in `STRIPE_WEBHOOK_SECRET`.
+
+## Tests
 
 ```bash
-npm run dev
-```
+cd backend-java
+./mvnw test                                          # 82 unit and integration tests; Docker is needed for Testcontainers
+./mvnw test -Dgroups=load -Dtest.excluded.groups=    # the load scenarios above, written to target/loadtest-results.json
+./mvnw test -Dgroups=live -Dtest.excluded.groups=    # calls the real Replicate, Cloudinary and Gemini (costs a few cents)
 
-Open [http://localhost:3000](http://localhost:3000)
-
-### Run Tests
-
-```bash
+cd ../frontend
 npm test
 ```
 
-Jest unit tests cover the chat and image services (credit deduction, refunds on failure, provider fallback, prompt validation, the daily rate limit) and the PayPal purchase flow (server-side pricing, order ownership, repeated and pending captures, amount mismatch).
+## API
 
-## Features
+| Method | Path | Who | What |
+|---|---|---|---|
+| GET | `/api/styles` | anyone | Style presets |
+| GET | `/api/credit-packages` | anyone | Credit packages and prices |
+| GET | `/api/me/credits` | signed in | Balance |
+| GET | `/api/me/credit-ledger` | signed in | Ledger entries, newest first |
+| POST | `/api/images` | signed in | Submit a prompt; charges 1 credit and returns `202` with the image id |
+| GET | `/api/images/{id}` | anyone with the link | Status and, when done, the image URL |
+| GET | `/api/me/images` | signed in | Gallery |
+| POST | `/api/prompts/enhance` | signed in | Expand a few words into a detailed prompt |
+| POST | `/api/payments/checkout` | signed in | Create a Stripe Checkout session for a package |
+| POST | `/api/payments/{orderId}/confirm` | signed in | Return-page confirmation |
+| POST | `/api/webhooks/replicate`, `/api/webhooks/stripe` | provider | Signed webhooks |
 
-- **AI Chat**: conversations with Gemini, falling back to OpenAI, with cached replies
-- **Image Generation**: text-to-image with Replicate's FLUX Schnell, stored in Cloudinary
-- **Credit System**: new users get 20 free credits; each image or chat reply costs 1 credit and is refunded if generation fails
-- **Credit Purchase**: packs of 10, 30 or 60 credits via PayPal; the server creates and captures the order and credits the account once
-- **User Dashboard**: browse your generated images, download them, or share a public link
-- **Admin API**: platform stats and user list, for the admin role only
+## Repository layout
 
-## Roadmap
-
-- Comic storyboard generation: one character kept consistent across a four-panel page
+```
+backend-java/   Spring Boot backend (credits, ledger, Stripe, image jobs, prompts)
+frontend/       Next.js pages; they reach the backend only through /api/**
+docker-compose.yml   MongoDB replica set and Redis for local development
+```
