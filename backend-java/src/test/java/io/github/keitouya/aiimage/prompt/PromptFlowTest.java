@@ -52,7 +52,7 @@ class PromptFlowTest {
 	void stylesArePublic() throws Exception {
 		mvc.perform(get("/api/styles"))
 			.andExpect(status().isOk())
-			.andExpect(jsonPath("$.length()").value(7))
+			.andExpect(jsonPath("$.length()").value(9))
 			.andExpect(jsonPath("$[0].id").value("none"))
 			.andExpect(jsonPath("$[0].text").doesNotExist());
 	}
@@ -97,9 +97,9 @@ class PromptFlowTest {
 	void nonEnglishPromptIsTranslatedBeforeTheStyleIsAdded() {
 		when(primary.complete(eq(Translator.INSTRUCTIONS), eq("一辆红色的摩托车"))).thenReturn("A red motorcycle");
 
-		assertThat(preparer.forImageModel("一辆红色的摩托车", "comic")).isEqualTo(
-				"comic book illustration, bold ink outlines, halftone shading, flat vivid colors, dynamic composition, "
-						+ "A red motorcycle");
+		assertThat(preparer.forImageModel("一辆红色的摩托车", "manga")).isEqualTo(
+				"black and white manga panel, screentone shading, speed lines, crisp ink line art, high contrast, "
+						+ "no text, no speech bubbles, A red motorcycle");
 	}
 
 	@Test

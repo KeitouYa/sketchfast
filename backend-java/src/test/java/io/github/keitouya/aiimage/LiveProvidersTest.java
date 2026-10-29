@@ -63,7 +63,7 @@ class LiveProvidersTest {
 	@Test
 	void oneRealImageIsGeneratedAndStored() throws Exception {
 		CurrentUser user = new CurrentUser("live-" + UUID.randomUUID() + "@test.dev", "Live");
-		String id = images.submit(user, "a red vintage motorcycle parked by the sea at sunset", "photo").id();
+		String id = images.submit(user, "a red vintage motorcycle parked by the sea at sunset", "anime-film").id();
 		String jobId = image(id).providerJobId();
 
 		Instant deadline = Instant.now().plus(Duration.ofSeconds(120));

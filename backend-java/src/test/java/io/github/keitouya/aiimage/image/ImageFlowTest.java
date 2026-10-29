@@ -90,14 +90,14 @@ class ImageFlowTest {
 
 	@Test
 	void submitChargesOneCreditAndStartsTheJobWithTheStyleFirst() throws Exception {
-		String id = submit("a red bicycle", "anime");
+		String id = submit("a red bicycle", "anime-film");
 
 		Image image = image(id);
 		assertThat(image.status()).isEqualTo(Status.PENDING);
 		assertThat(image.prompt()).isEqualTo("a red bicycle");
 		assertThat(image.providerJobId()).isNotNull();
-		assertThat(generator.prompts).contains("anime key visual, clean line art, cel shading, vibrant colors, "
-				+ "detailed background, a red bicycle");
+		assertThat(generator.prompts).contains("hand-drawn 2D anime film still, soft painterly sky with big fluffy "
+				+ "clouds, lush greenery, warm gentle colors, painted backgrounds, nostalgic mood, no text, a red bicycle");
 		assertThat(credits.balance(email)).isEqualTo(19);
 	}
 
@@ -318,7 +318,7 @@ class ImageFlowTest {
 
 	@Test
 	void safetyFilterRejectionIsReportedAsContentFilteredAndRefunded() throws Exception {
-		String id = submit("a single rose, close-up", "comic");
+		String id = submit("a single rose, close-up", "american-comic");
 		generator.filter(image(id).providerJobId());
 
 		mvc.perform(get("/api/images/" + id).with(user))
